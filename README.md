@@ -1,4 +1,1 @@
-node-sqlanywhere
-================
-
-SAP SQL Anywhere Database Client for Node
+This is the JavaScript Node.js driver for SQL Anywhere.
