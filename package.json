@@ -4,7 +4,7 @@
   "description": "SQL Anywhere JavaScript Driver.",
   "version": "1.0.0",
   "repository": {
-    "url": ""
+    "url": "https://github.com/sqlanywhere/node-sqlanywhere"
   },
   "main": "./lib/index",
   "engines": {
