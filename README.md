@@ -32,7 +32,7 @@ conn.connect(conn_params, function() {
 
 ##Establish a database connection
 ###Connecting
-A database connection object is created by calling `createConnection`.  The connection is established by calling the connection objects `connect` method, and passing in an object representing connection parameters. The object can contain most valid [connection properties](http://dcx.sybase.com/index.html#sa160/en/dbadmin/da-conparm.html).
+A database connection object is created by calling `createConnection`.  The connection is established by calling the connection object's `connect` method, and passing in an object representing connection parameters. The object can contain most valid [connection properties](http://dcx.sybase.com/index.html#sa160/en/dbadmin/da-conparm.html).
 
 #####Example: Connecting over TCP/IP
 ```js
@@ -56,7 +56,7 @@ conn.connect({
 ###Disconnecting
 
 ```js
-conn.disconnet(function(err) {
+conn.disconnect(function(err) {
   if (err) throw err;
   console.log('Disconnected');
 });
