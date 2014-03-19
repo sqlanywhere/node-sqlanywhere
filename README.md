@@ -62,7 +62,7 @@ conn.disconnect(function(err) {
 });
 ```
 ##Direct Statement Execution
-Direct statement execution is the simplest way to execute SQL statements. The only input parameter is the SQL command to be executed. Generally we return the statement execution results using callbacks. The type of returned result depends on the kind of statement.
+Direct statement execution is the simplest way to execute SQL statements. The inputs are the SQL command to be executed, and an optional array of positional arguments. The result is returned using callbacks. The type of returned result depends on the kind of statement.
 
 ####DDL Statement
 
