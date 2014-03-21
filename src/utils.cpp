@@ -248,7 +248,7 @@ bool getResultSet( Local<Value> 			&Result
 		switch( col_types[count] ) {
 		    case A_INVALID_TYPE:
 			curr_row->Set( String::NewSymbol( colNames[i] ), Null() );
-		    
+		        break;
 		    case A_VAL32:
 		    case A_VAL16:
 		    case A_UVAL16:
