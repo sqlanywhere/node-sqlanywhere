@@ -248,7 +248,8 @@ bool getResultSet( Local<Value> 			&Result
 		switch( col_types[count] ) {
 		    case A_INVALID_TYPE:
 			curr_row->Set( String::NewSymbol( colNames[i] ), Null() );
-		    
+			break;
+
 		    case A_VAL32:
 		    case A_VAL16:
 		    case A_UVAL16:
@@ -477,7 +478,6 @@ bool fetchResultSet( a_sqlany_stmt 			*sqlany_stmt
 			
                     default:
 			return false;
-			break;
 		}
 		col_types.push_back( value.type );
 	    }
@@ -490,9 +490,11 @@ bool fetchResultSet( a_sqlany_stmt 			*sqlany_stmt
 bool cleanAPI() 
 {
     if( openConnections == 0 ) {
-        api.sqlany_fini();
-        sqlany_finalize_interface( &api );
-	return true;
+	if( api.initialized ) {
+	    api.sqlany_fini();
+	    sqlany_finalize_interface( &api );
+	    return true;
+	}
     }
     return false;
 }
@@ -687,8 +689,9 @@ Connection::~Connection()
     if( conn != NULL ) {
 	api.sqlany_disconnect( conn );
 	api.sqlany_free_connection( conn );
+	conn = NULL;
+	openConnections--;
     }
-    openConnections--;
     
     cleanAPI();
 };

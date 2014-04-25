@@ -682,7 +682,7 @@ void Connection::disconnectWork( uv_work_t *req )
     baton->obj->conn = NULL;
     openConnections--;
 
-    if( openConnections <= 0 && api.initialized ) {	
+    if( openConnections <= 0 ) {	
 	openConnections = 0;
 	cleanAPI();
     }
