@@ -160,6 +160,14 @@ void executeAfter( uv_work_t *req )
     executeBaton *baton = static_cast<executeBaton*>( req->data );
     Local<Value> ResultSet;
     fillResult( baton, ResultSet );
+
+    scoped_lock	lock( baton->obj->conn_mutex );
+
+    if( baton->sqlany_stmt != NULL ) {
+     	api.sqlany_free_stmt( baton->sqlany_stmt );
+	baton->sqlany_stmt = NULL;
+    }
+
     delete baton;
     delete req;
 }

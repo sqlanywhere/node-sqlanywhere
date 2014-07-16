@@ -160,5 +160,5 @@ conn.rollback(function(err) {
 
 ##Resources
 + [SAP SQL Anywhere Documentation](http://dcx.sybase.com/)
-+ [SAP SQL Anywhere Developer Q&A Forum](http://sqlanywhere-forum.sybase.com/)
++ [SAP SQL Anywhere Developer Q&A Forum](http://sqlanywhere-forum.sap.com/)
 
