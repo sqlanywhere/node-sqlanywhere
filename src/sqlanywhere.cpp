@@ -164,7 +164,9 @@ void executeAfter( uv_work_t *req )
     scoped_lock	lock( baton->obj->conn_mutex );
 
     if( baton->sqlany_stmt != NULL ) {
-     	api.sqlany_free_stmt( baton->sqlany_stmt );
+      if( api.initialized ) {
+     	    api.sqlany_free_stmt( baton->sqlany_stmt );
+      }
 	baton->sqlany_stmt = NULL;
     }
 
