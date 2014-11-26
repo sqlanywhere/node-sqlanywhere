@@ -17,10 +17,11 @@ var util = require('util');
 var waterfall = require('async-waterfall');
 var sqlanywhere = require('sqlanywhere');
 
-var cstr = { Server	: 'demo16',
-	     UserID	: 'DBA',
-	     Password	: 'sql'
-	    };
+var cstr = {
+    Host: '54.147.208.71:2638',
+    UserId: 'DBA',
+    Password: 'sql'
+};
 
 var client = sqlanywhere.createConnection();
 
