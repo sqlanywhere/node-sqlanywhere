@@ -111,6 +111,7 @@ conn.exec("SELECT * FROM Test WHERE id BETWEEN ? AND ?", [5, 8], function (err, 
   console.log('Rows:', rows);
 });
 ```
+Queries returning multiple result sets are not supported.
 
 ##Prepared Statement Execution
 ####Prepare a Statement
