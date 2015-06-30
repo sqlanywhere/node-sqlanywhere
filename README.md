@@ -7,6 +7,9 @@ This is a Node.js driver written for [SAP SQL Anywhere](http://www.sap.com/pc/te
 npm install sqlanywhere
 ```
 ####Prerequisites
+
+**Currently this driver only supports node v0.10**
+
 This driver communicates with the native SQL Anywhere libraries, and thus requires native compilation. Native compilation is managed by [`node-gyp`](https://github.com/TooTallNate/node-gyp/). Please see that project for additional prerequisites including Python 2.7, and C/C++ tool chain.
 
 The official version hosted on NPM includes precompiled libraries for Windows (32-bit and 64-bit).
