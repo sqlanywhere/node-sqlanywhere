@@ -2,13 +2,13 @@
   "author": "SQL ANYWHERE ",
   "name": "sqlanywhere",
   "description": "SQL Anywhere JavaScript Driver.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "repository": {
     "url": "https://github.com/sqlanywhere/node-sqlanywhere"
   },
   "main": "./lib/index",
   "engines": {
-    "node": ">=0.10 <0.11"
+    "node": ">=0.10"
   },
   "scripts": {
     "install": "node build.js"

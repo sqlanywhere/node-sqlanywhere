@@ -7,12 +7,15 @@ This is a Node.js driver written for [SAP SQL Anywhere](http://www.sap.com/pc/te
 npm install sqlanywhere
 ```
 ####Prerequisites
+This driver communicates with the native SQL Anywhere libraries, and thus requires
+native compilation. Native compilation is managed by 
+[`node-gyp`](https://github.com/TooTallNate/node-gyp/). Please see that project 
+for additional prerequisites including Python 2.7, and C/C++ tool chain.
 
-**Currently this driver only supports node v0.10**
+The official version hosted on NPM includes precompiled libraries for Windows 
+(32-bit and 64-bit).
 
-This driver communicates with the native SQL Anywhere libraries, and thus requires native compilation. Native compilation is managed by [`node-gyp`](https://github.com/TooTallNate/node-gyp/). Please see that project for additional prerequisites including Python 2.7, and C/C++ tool chain.
-
-The official version hosted on NPM includes precompiled libraries for Windows (32-bit and 64-bit).
+As of version 1.0.4, the node-sqlanywhere driver supports node.js v0.10, 0.12, and 4.x.
 
 ##Getting Started
 
@@ -34,13 +37,17 @@ conn.connect(conn_params, function() {
 
     console.log('Name: ', result[0].Name, ', Description: ', result[0].Description);
     // output --> Name: Tee Shirt, Description: V-neck
+    conn.disconnect();
   })
 });
 ```
 
 ##Establish a database connection
 ###Connecting
-A database connection object is created by calling `createConnection`.  The connection is established by calling the connection object's `connect` method, and passing in an object representing connection parameters. The object can contain most valid [connection properties](http://dcx.sybase.com/index.html#sa160/en/dbadmin/da-conparm.html).
+A database connection object is created by calling `createConnection`.  The 
+connection is established by calling the connection object's `connect` method, 
+and passing in an object representing connection parameters. The object can 
+contain most valid [connection properties](http://dcx.sybase.com/index.html#sa160/en/dbadmin/da-conparm.html).
 
 #####Example: Connecting over TCP/IP
 ```js
@@ -70,7 +77,10 @@ conn.disconnect(function(err) {
 });
 ```
 ##Direct Statement Execution
-Direct statement execution is the simplest way to execute SQL statements. The inputs are the SQL command to be executed, and an optional array of positional arguments. The result is returned using callbacks. The type of returned result depends on the kind of statement.
+Direct statement execution is the simplest way to execute SQL statements. The 
+inputs are the SQL command to be executed, and an optional array of positional 
+arguments. The result is returned using callbacks. The type of returned result 
+depends on the kind of statement.
 
 ####DDL Statement
 
@@ -97,7 +107,8 @@ conn.exec("INSERT INTO Test(msg) SELECT 'Hello,' || row_num FROM sa_rowgenerator
 
 ####Query
 
-The `exec` function is a convenient way to completely retrieve the result of a query. In this case all selected rows are fetched and returned in the callback. 
+The `exec` function is a convenient way to completely retrieve the result of a 
+query. In this case all selected rows are fetched and returned in the callback. 
 
 ```js
 conn.exec("SELECT * FROM Test WHERE id < 5", function (err, rows) {
@@ -106,7 +117,8 @@ conn.exec("SELECT * FROM Test WHERE id < 5", function (err, rows) {
 });
 ```
 
-Values in the query can be substitued with JavaScript variables by using `?` placeholders in the query, and passing an array of positional arguments.
+Values in the query can be substitued with JavaScript variables by using `?` 
+placeholders in the query, and passing an array of positional arguments.
 
 ```js
 conn.exec("SELECT * FROM Test WHERE id BETWEEN ? AND ?", [5, 8], function (err, rows) {
@@ -114,7 +126,6 @@ conn.exec("SELECT * FROM Test WHERE id BETWEEN ? AND ?", [5, 8], function (err, 
   console.log('Rows:', rows);
 });
 ```
-Queries returning multiple result sets are not supported.
 
 ##Prepared Statement Execution
 ####Prepare a Statement
@@ -127,7 +138,8 @@ conn.prepare('SELECT * FROM Test WHERE id = ?', function (err, stmt){
 ```
 
 ####Execute a Statement
-The execution of a prepared statement is similar to the direct statement execution. The first parameter of `exec` function is an array with positional parameters.
+The execution of a prepared statement is similar to the direct statement execution.
+The first parameter of `exec` function is an array with positional parameters.
 ```js
 stmt.exec([16], function(err, rows) {
   if (err) throw err;
@@ -143,7 +155,8 @@ stmt.drop(function(err) {
 ```
 
 ##Transaction Handling
-__Transactions are  not automatically commited.__ Executing a statement implicitly starts a new transaction that must be explicitly committed, or rolled back. 
+__Transactions are  not automatically commited.__ Executing a statement implicitly
+starts a new transaction that must be explicitly committed, or rolled back. 
 
 ####Commit a Transaction
 
@@ -163,6 +176,5 @@ conn.rollback(function(err) {
 ```
 
 ##Resources
-+ [SAP SQL Anywhere Documentation](http://dcx.sybase.com/)
++ [SAP SQL Anywhere Documentation](http://dcx.sap.com/)
 + [SAP SQL Anywhere Developer Q&A Forum](http://sqlanywhere-forum.sap.com/)
-

@@ -2,16 +2,17 @@
 // Copyright (c) 2015 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
 #include "nodever_cover.h"
-#include "sqlany_utils.h"
 
-#if !v010
+#if v010
+
+#include "sqlany_utils.h"
 
 using namespace v8;
 using namespace node;
 
-void getErrorMsg( int code, std::string &str )
-/********************************************/
+void getErrorMsg( int code, std::string &str ) 
 {
+
     std::ostringstream message;
     message << "Code: ";
     message << code;
@@ -49,8 +50,7 @@ void getErrorMsg( int code, std::string &str )
 
 }
 
-void getErrorMsg( a_sqlany_connection *conn, std::string &str )
-/*************************************************************/
+void getErrorMsg( a_sqlany_connection *conn, std::string &str ) 
 {
     char buffer[SACAPI_ERROR_SIZE];
     int rc;
@@ -63,89 +63,57 @@ void getErrorMsg( a_sqlany_connection *conn, std::string &str )
     str = message.str();
 }
 
-void throwError( a_sqlany_connection *conn )
-/******************************************/
+void throwError( a_sqlany_connection *conn ) 
 {
-    Isolate *isolate = Isolate::GetCurrent();
     std::string message;
     getErrorMsg( conn, message );
-    isolate->ThrowException( 
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ) ) );
+    ThrowException( Exception::Error( String::New(  message.c_str() ) ) );
 }
 
-void throwError( int code )
-/*************************/
+void throwError( int code ) 
 {
-    Isolate *isolate = Isolate::GetCurrent();
     std::string message;
     getErrorMsg( code, message );
-    isolate->ThrowException( 
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ) ) );
+    ThrowException( Exception::Error( String::New(  message.c_str() ) ) );
 }
 
-void callBack( std::string *		str,
-	       Persistent<Function> &	callback,
-	       Local<Value> &		Result,
-	       bool			callback_required )
-/*********************************************************/
+void callBack( std::string *str, Persistent<Function> callback, Local<Value> Result, bool callback_required ) 
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    Local<Function> local_callback = Local<Function>::New( isolate, callback );
-
     // If string is NULL, then there is no error
     if( callback_required ) {
-	if( !local_callback->IsFunction() ) {
+	if( !callback->IsFunction() ) {
 	    throwError( JS_ERR_INVALID_ARGUMENTS );
 	    return;
 	}
 	
 	Local<Value> Err;
 	if( str == NULL ) {
-	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
+	    Err = Local<Value>::New( Undefined() );
 	
 	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) );
+	    Err = Exception::Error( String::New( str->c_str() ) );
 	}
 	
 	int argc = 2;
-	Local<Value> argv[2] = { Err, Result };
+	Local<Value> argv[2] = { Err,  Result };
 	
 	TryCatch try_catch;
-	local_callback->Call( isolate->GetCurrentContext()->Global(), argc, argv );
+	callback->Call( Context::GetCurrent()->Global(), argc, argv );
 	if( try_catch.HasCaught()) {
-	    node::FatalException( isolate, try_catch );
+	    node::FatalException( try_catch );
 	}
+	callback.Dispose();
+	
     } else {
 	if( str != NULL ) {
-	    isolate->ThrowException(
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) ) );
+	    ThrowException( Exception::Error( String::New( str->c_str() ) ) );
 	}
     }
+    return;
 }
 
-void callBack( std::string *		str,
-	       Persistent<Function> &	callback,
-	       Persistent<Value> &	Result,
-	       bool			callback_required )
-/*********************************************************/
+void callBack( std::string *str, Local<Value> arg, Local<Value> Result, bool callback_required ) 
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    Local<Value> local_result = Local<Value>::New( isolate, Result );
-
-    callBack( str, callback, local_result, callback_required );
-}
-
-void callBack( std::string *		str,
-	       const Local<Value> &	arg,
-	       Local<Value> &		Result,
-	       bool			callback_required )
-/*********************************************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-
     // If string is NULL, then there is no error
     if( callback_required ) {
 	if( !arg->IsFunction() ) {
@@ -156,36 +124,36 @@ void callBack( std::string *		str,
 	
 	Local<Value> Err;
 	if( str == NULL ) {
-	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
+	    Err = Local<Value>::New( Undefined() );
 	
 	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) );
+	    Err = Exception::Error( String::New( str->c_str() ) );
 	}
 	
 	int argc = 2;
 	Local<Value> argv[2] = { Err,  Result };
 	
 	TryCatch try_catch;
-	callback->Call( isolate->GetCurrentContext()->Global(), argc, argv );
+	callback->Call( Context::GetCurrent()->Global(), argc, argv );
 	if( try_catch.HasCaught()) {
-	    node::FatalException( isolate, try_catch );
+	    node::FatalException( try_catch );
 	}
 	
     } else {
 	if( str != NULL ) {
-	    isolate->ThrowException( 
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) ) );
+	    ThrowException( Exception::Error( String::New( str->c_str() ) ) );
 	}
     }
+    return;
 }
 
-bool getBindParameters( std::vector<char*> &			string_params,
-			std::vector<double*> &			num_params,
-			std::vector<int*> &			int_params,
-			std::vector<size_t*> &			string_len,
-			Handle<Value> 				arg,
-			std::vector<a_sqlany_bind_param> &	params )
-/**********************************************************************/
+bool getBindParameters( std::vector<char*>			&string_params
+		      , std::vector<double*>			&num_params
+		      , std::vector<int*>			&int_params
+		      , std::vector<size_t*>			&string_len
+		      , Handle<Value> 				arg
+		      , std::vector<a_sqlany_bind_param> 	&params
+		      ) 
 {
 		   
     Handle<Array>		bind_params = Handle<Array>::Cast( arg );
@@ -252,40 +220,38 @@ bool getBindParameters( std::vector<char*> &			string_params,
     return true;	   
 }
 
-bool getResultSet( Persistent<Value> &			Result,
-		   int &				rows_affected,
-		   std::vector<char *> &		colNames,
-		   std::vector<char*> &			string_vals,
-		   std::vector<double*> &		num_vals,
-		   std::vector<int*> &			int_vals,
-		   std::vector<size_t*> &		string_len,
-		   std::vector<a_sqlany_data_type> &	col_types )
-/*****************************************************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
+bool getResultSet( Local<Value> 			&Result   
+		 , int 					&rows_affected
+		 , std::vector<char *> 			&colNames
+		 , std::vector<char*> 			&string_vals
+		 , std::vector<double*>			&num_vals
+		 , std::vector<int*> 			&int_vals
+		 , std::vector<size_t*> 		&string_len
+		 , std::vector<a_sqlany_data_type> 	&col_types ) {
+		   
     int 	num_rows = 0;
     size_t	num_cols = colNames.size();
-
+    
     if( rows_affected >= 0 ) {
-	Result.Reset( isolate, Integer::New( isolate, rows_affected ) );
+	Result = Integer::New( rows_affected );
 	return true;
     }
     
     if( num_cols > 0 ) {
 	size_t count = 0;
 	size_t count_int = 0, count_num = 0, count_string = 0;
-	Local<Array> ResultSet = Array::New( isolate );
+	Result = Array::New();
 	while( count_int < int_vals.size() || 
 	       count_num < num_vals.size() || 
 	       count_string < string_vals.size()  ) {
-	    Local<Object> curr_row = Object::New( isolate );
+	    Local<Array> ResultSet = Local<Array>::Cast( Result );
+	    Local<Object> curr_row = Object::New();
 	    num_rows++;
 	    for( size_t i = 0; i < num_cols; i++ ) {
+
 		switch( col_types[count] ) {
 		    case A_INVALID_TYPE:
-			curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-				       Null( isolate ) );
+			curr_row->Set( String::NewSymbol( colNames[i] ), Null() );
 			break;
 
 		    case A_VAL32:
@@ -294,11 +260,9 @@ bool getResultSet( Persistent<Value> &			Result,
 		    case A_VAL8:
 		    case A_UVAL8:
 			if( int_vals[count_int] == NULL ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
+			    curr_row->Set( String::NewSymbol( colNames[i] ), Null() );
 			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Integer::New( isolate, *int_vals[count_int] ) );
+			    curr_row->Set( String::NewSymbol( colNames[i] ), Integer::New( *int_vals[count_int] ) );
 			}
 			delete int_vals[count_int];
 			int_vals[count_int] = NULL;
@@ -310,11 +274,9 @@ bool getResultSet( Persistent<Value> &			Result,
 		    case A_VAL64:
 		    case A_DOUBLE:
 			if( num_vals[count_num] == NULL ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
+			    curr_row->Set( String::NewSymbol( colNames[i] ), Null() );
 			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Number::New( isolate, *num_vals[count_num] ) );
+			    curr_row->Set( String::NewSymbol( colNames[i] ), Number::New( *num_vals[count_num] ) );
 			}
 			delete num_vals[count_num];
 			num_vals[count_num] = NULL;
@@ -323,25 +285,11 @@ bool getResultSet( Persistent<Value> &			Result,
 			
 		    case A_BINARY:
 			if( string_vals[count_string] == NULL ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
+			    curr_row->Set( String::NewSymbol( colNames[i] ), Null() );
 			} else {
-#if v012
-			    Local<Object> buf = node::Buffer::New( 
-				isolate, string_vals[count_string],
-				*string_len[count_string] ); 
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-					   buf );
-#else
-			    MaybeLocal<Object> mbuf = node::Buffer::Copy( 
-				isolate, string_vals[count_string],
-				*string_len[count_string] ); 
-			    Local<Object> buf = mbuf.ToLocalChecked();
-#endif
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-					   buf );
+			    Buffer *bp = Buffer::New( *string_len[count_string] );
+			    memcpy( Buffer::Data(bp), string_vals[count_string], *string_len[count_string] );
+			    curr_row->Set( String::NewSymbol( colNames[i] ), bp->handle_ ) ;
 			}
 			delete string_vals[count_string];
 			delete string_len[count_string];
@@ -352,23 +300,9 @@ bool getResultSet( Persistent<Value> &			Result,
 			
 		    case A_STRING:		    
 			if( string_vals[count_string] == NULL ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
+			    curr_row->Set( String::NewSymbol( colNames[i] ), Null() );
 			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-#if v012
-					   String::NewFromUtf8( isolate,
-								string_vals[count_string],
-								String::NewStringType::kNormalString,
-								*( (int*)string_len[count_string] ) )
-#else
-					   String::NewFromUtf8( isolate,
-								string_vals[count_string],
-								NewStringType::kNormal,
-								*( (int*)string_len[count_string] ) ).ToLocalChecked() 
-#endif
-				);
+			    curr_row->Set( String::NewSymbol( colNames[i] ), String::New( string_vals[count_string], *( (int*)string_len[count_string] ) ) );
 			}
 			delete string_vals[count_string];
 			delete string_len[count_string];
@@ -379,30 +313,28 @@ bool getResultSet( Persistent<Value> &			Result,
 			
                     default:
 			return false;
+			break;
 		}
+		ResultSet->Set( num_rows - 1, curr_row );
 		count++;
 	    }
-	    ResultSet->Set( num_rows - 1, curr_row );
 	}
-	Result.Reset( isolate, ResultSet );
     } else {
-	Result.Reset( isolate, Local<Value>::New( isolate, 
-						  Undefined( isolate ) ) );
+    
+	Result = Local<Value>::New( Undefined() );
     }
     
     return true;
 }
 
-bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
-		     int &				rows_affected,
-		     std::vector<char *> &		colNames,
-		     std::vector<char*> &		string_vals,
-		     std::vector<double*> &		num_vals,
-		     std::vector<int*> &		int_vals,
-		     std::vector<size_t*> &		string_len,
-		     std::vector<a_sqlany_data_type> &	col_types )
-/*****************************************************************/
-{
+bool fetchResultSet( a_sqlany_stmt 			*sqlany_stmt
+		   , int 				&rows_affected
+		   , std::vector<char *> 		&colNames
+		   , std::vector<char*> 		&string_vals
+		   , std::vector<double*>		&num_vals
+		   , std::vector<int*> 			&int_vals
+		   , std::vector<size_t*> 		&string_len
+		   , std::vector<a_sqlany_data_type> 	&col_types ) {
     
     a_sqlany_data_value		value;
     int				num_cols = 0;
@@ -559,8 +491,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
     return true;
 }
 
-bool cleanAPI()
-/*************/
+bool cleanAPI() 
 {
     if( openConnections == 0 ) {
 	if( api.initialized ) {
@@ -577,21 +508,16 @@ bool cleanAPI()
 // Does not take any parameters. 
 // Create custom Baton and Callback (After) functions otherwise
 
-void Connection::noParamAfter( uv_work_t *req )
-/*********************************************/
+void Connection::noParamAfter( uv_work_t *req ) 
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope	scope(isolate);
     noParamBaton *baton = static_cast<noParamBaton*>(req->data);
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-
+    
     if( baton->err ) {
-	callBack( &( baton->error_msg ), baton->callback, undef,
-		  baton->callback_required );
+	callBack( &( baton->error_msg ), baton->callback, Local<Value>::New( Undefined() ), baton->callback_required );
 	return;
     }
     
-    callBack( NULL, baton->callback, undef, baton->callback_required );
+    callBack( NULL, baton->callback, Local<Value>::New( Undefined() ),  baton->callback_required );
     
     delete baton;
     delete req;
@@ -599,15 +525,12 @@ void Connection::noParamAfter( uv_work_t *req )
 
 
 // Stmt Object Functions
-StmtObject::StmtObject()
-/**********************/
+StmtObject::StmtObject() 
 {
     connection = NULL;
     sqlany_stmt = NULL;
 }
-
-StmtObject::~StmtObject()
-/***********************/
+StmtObject::~StmtObject() 
 {
     if( sqlany_stmt != NULL ) {
 	api.sqlany_free_stmt( sqlany_stmt );
@@ -616,62 +539,57 @@ StmtObject::~StmtObject()
 
 Persistent<Function> StmtObject::constructor;
 
-void StmtObject::Init( Isolate *isolate )
-/***************************************/
+void StmtObject::Init() 
 {
-    HandleScope	scope(isolate);
     // Prepare constructor template
-    Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "StmtObject" ) );
+    Local<FunctionTemplate> tpl = FunctionTemplate::New( New );
+    tpl->SetClassName( String::NewSymbol( "StmtObject" ) );
     tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
-
     // Prototype
-    NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "drop", drop );
-    constructor.Reset( isolate, tpl->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "exec" ),
+	FunctionTemplate::New( exec )->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "drop" ),
+	FunctionTemplate::New( drop )->GetFunction() );
+    
+    constructor = Persistent<Function>::New( tpl->GetFunction() );
 }
 
-void StmtObject::New( const FunctionCallbackInfo<Value> &args )
-/*************************************************************/
+Handle<Value> StmtObject::New( const Arguments &args ) 
 {
+    HandleScope scope;
     StmtObject* obj = new StmtObject();
 
     obj->Wrap( args.This() );
-    args.GetReturnValue().Set( args.This() );
+    return args.This();
 }
 
-void StmtObject::NewInstance( const FunctionCallbackInfo<Value> &args )
-/*********************************************************************/
+Handle<Value> StmtObject::NewInstance( const Arguments &args ) 
 {
-    Persistent<Object> obj;
-    CreateNewInstance( args, obj );
-    args.GetReturnValue().Set( obj );
-}
+    HandleScope scope;
 
-void StmtObject::CreateNewInstance( const FunctionCallbackInfo<Value> &	args,
-				    Persistent<Object> &		obj )
-/***************************************************************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope	scope(isolate);
     const unsigned argc = 1;
     Handle<Value> argv[argc] = { args[0] };
-    Local<Function>cons = Local<Function>::New( isolate, constructor );
-    obj.Reset( isolate, cons->NewInstance( argc, argv ) );
+    Local<Object> instance = constructor->NewInstance( argc, argv );
+
+    return scope.Close( instance );
 }
 
 
 // Connection Functions
 
-void HashToString( Local<Object> obj, Persistent<String> &ret )
-/*************************************************************/
+Handle<Value> CreateConnection( const Arguments &args ) 
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope	scope(isolate);
+    HandleScope scope;
+    return scope.Close( Connection::NewInstance( args ) );
+}
+
+Persistent<String> HashToString( Local<Object> obj )
+/**************************************************/
+{
     Local<Array> props = obj->GetOwnPropertyNames();
     int length = props->Length();
     std::string params = "";
-    bool	first = true;
+    bool	first = true;;
     for( int i = 0; i < length; i++ ) {
 	Local<String> key = props->Get(i).As<String>();
 	Local<String> val = obj->Get(key).As<String>();
@@ -685,7 +603,7 @@ void HashToString( Local<Object> obj, Persistent<String> &ret )
 	params += "=";
 	params += std::string(*val_utf8);
     }
-    ret.Reset( isolate, String::NewFromUtf8( isolate, params.c_str() ) );
+    return Persistent<String>::New( String::New((const char *)params.c_str()) );
 }
 
 #if 0
@@ -734,11 +652,9 @@ static void CheckArgType( Local<Value> &obj )
 }
 #endif
 
-Connection::Connection( const FunctionCallbackInfo<Value> &args )
-/***************************************************************/
+Connection::Connection( const Arguments &args )
+/*********************************************/
 {
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
     uv_mutex_init(&conn_mutex);
     conn = NULL;
 
@@ -754,17 +670,17 @@ Connection::Connection( const FunctionCallbackInfo<Value> &args )
 	    int string_len = str->Utf8Length();
 	    char *buf = new char[string_len+1];
 	    str->WriteUtf8( buf );
-	    _arg.Reset( isolate, String::NewFromUtf8( isolate, buf ) );
+	    _arg = Persistent<String>::New( String::New(buf, string_len) );
 	    delete [] buf;
 	} else if( args[0]->IsObject() ) {
-	    HashToString( args[0]->ToObject(), _arg );
+	    _arg = HashToString( args[0]->ToObject() );
 	} else if( !args[0]->IsUndefined() && !args[0]->IsNull() ) {
 	    throwError( JS_ERR_INVALID_ARGUMENTS );
 	} else {
-	    _arg.Reset( isolate, String::NewFromUtf8( isolate, "" ) );
+	    _arg = Persistent<String>::New( String::New("") );
 	}
     } else {
-	_arg.Reset( isolate, String::NewFromUtf8( isolate, "" ) );
+	_arg = Persistent<String>::New( String::New("") );
     }
 }
 
@@ -775,7 +691,7 @@ Connection::~Connection()
     scoped_lock api_lock( api_mutex );
     scoped_lock lock( conn_mutex );
 
-    _arg.Reset();
+    _arg.Dispose();
     if( conn != NULL ) {
 	api.sqlany_disconnect( conn );
 	api.sqlany_free_connection( conn );
@@ -788,53 +704,49 @@ Connection::~Connection()
 
 Persistent<Function> Connection::constructor;
 
-void Connection::Init( Isolate *isolate )
-/***************************************/
+void Connection::Init()
+/*********************/
 {
-    HandleScope scope( isolate );
     // Prepare constructor template
-    Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "Connection" ) );
+    Local<FunctionTemplate> tpl = FunctionTemplate::New( New );
+    tpl->SetClassName( String::NewSymbol( "Connection" ) );
     tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
     
     // Prototype
-    NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "prepare", prepare );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "connect", connect );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "disconnect", disconnect );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "commit", commit );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "rollback", rollback );
-    constructor.Reset( isolate, tpl->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "exec" ),
+	FunctionTemplate::New( exec )->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "prepare" ),
+	FunctionTemplate::New( prepare )->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "connect" ),
+	FunctionTemplate::New( connect )->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "disconnect" ),
+	FunctionTemplate::New( disconnect )->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "commit" ),
+	FunctionTemplate::New( commit )->GetFunction() );
+    tpl->PrototypeTemplate()->Set( String::NewSymbol( "rollback" ),
+	FunctionTemplate::New( rollback )->GetFunction() );
+    constructor = Persistent<Function>::New( tpl->GetFunction() );
 }
 
-void Connection::New( const FunctionCallbackInfo<Value> &args )
-/*************************************************************/
+Handle<Value> Connection::New( const Arguments &args ) 
 {
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
+    HandleScope scope;
+    
+    Connection *obj = new Connection( args );
+    obj->Wrap( args.This() );
 
-    if( args.IsConstructCall() ) {
-	Connection *obj = new Connection( args );
-	obj->Wrap( args.This() );
-	args.GetReturnValue().Set( args.This() );
-    } else {
-	const int argc = 1;
-	Local<Value> argv[argc] = { args[0] };
-	Local<Function> cons = Local<Function>::New( isolate, constructor );
-	args.GetReturnValue().Set( cons->NewInstance( argc, argv ) );
-    }
+    return args.This();
 }
 
-void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
-/*********************************************************************/
+Handle<Value> Connection::NewInstance( const Arguments &args ) 
 {
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
+    HandleScope scope;
+
     const unsigned argc = 1;
     Handle<Value> argv[argc] = { args[0] };
-    Local<Function> cons = Local<Function>::New( isolate, constructor );
-    Local<Object> instance = cons->NewInstance( argc, argv );
-    args.GetReturnValue().Set( instance );
+    Local<Object> instance = constructor->NewInstance( argc, argv );
+
+    return scope.Close( instance );
 }
 
-#endif // !v010
+#endif // v010

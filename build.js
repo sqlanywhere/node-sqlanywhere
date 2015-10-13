@@ -1,6 +1,6 @@
 var db = null;
 var exec = require('child_process').exec;
-exec( "rm ./build/Release/nodesa.node", function( error, out, err ) {
+exec( "rm ./build/Release/sqlanywhere.node", function( error, out, err ) {
     try {
 	console.log( "Looking for binaries..." );
     
