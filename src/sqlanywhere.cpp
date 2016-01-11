@@ -51,6 +51,7 @@ struct executeBaton {
 	CLEAN_NUMS( int_vals );
 	CLEAN_NUMS( string_len );
 	col_types.clear();
+	callback.Reset();
 
 	for( size_t i = 0; i < params.size(); i++ ) {
 	    if( params[i].value.is_null != NULL ) {
@@ -180,6 +181,7 @@ void executeAfter( uv_work_t *req )
     executeBaton *baton = static_cast<executeBaton*>( req->data );
     Persistent<Value> ResultSet;
     fillResult( baton, ResultSet );
+	ResultSet.Reset();
 
     scoped_lock	lock( baton->obj->conn_mutex );
 
@@ -197,7 +199,7 @@ void executeAfter( uv_work_t *req )
 NODE_API_FUNC( StmtObject::exec )
 /*******************************/
 {
-    Isolate *isolate = args.GetIsolate();
+	Isolate *isolate = args.GetIsolate();
     HandleScope scope( isolate );
     StmtObject *obj = ObjectWrap::Unwrap<StmtObject>( args.This() );
     int num_args = args.Length();
@@ -279,6 +281,8 @@ NODE_API_FUNC( StmtObject::exec )
 	return;
     }
     args.GetReturnValue().Set( ResultSet );
+
+	ResultSet.Reset();
 }
 
 
@@ -352,15 +356,15 @@ NODE_API_FUNC( Connection::exec )
     req->data = baton;
     
     if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, executeWork,
-				(uv_after_work_cb)executeAfter );
-	assert(status == 0);
+		Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
+		baton->callback.Reset( isolate, callback );
+		int status;
+		status = uv_queue_work( uv_default_loop(), req, executeWork,
+					(uv_after_work_cb)executeAfter );
+		assert(status == 0);
 	
-	args.GetReturnValue().SetUndefined();
-	return;
+		args.GetReturnValue().SetUndefined();
+		return;
     }
     
     Persistent<Value> ResultSet;
@@ -381,6 +385,8 @@ NODE_API_FUNC( Connection::exec )
     }
     Local<Value> local_result = Local<Value>::New( isolate, ResultSet );
     args.GetReturnValue().Set( local_result );
+
+	ResultSet.Reset();
 }
 
 struct prepareBaton {
@@ -401,6 +407,8 @@ struct prepareBaton {
     
     ~prepareBaton() {
 	obj = NULL;
+	callback.Reset();
+	StmtObj.Reset();
     }
 };
 
@@ -494,6 +502,7 @@ NODE_API_FUNC( Connection::prepare )
 	getErrorMsg( JS_ERR_GENERAL_ERROR, error_msg );
 	callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
 	args.GetReturnValue().SetUndefined();
+	p_stmt.Reset();
 	return;
     }
     
@@ -517,6 +526,7 @@ NODE_API_FUNC( Connection::prepare )
 	assert(status == 0);
 	
 	args.GetReturnValue().SetUndefined();
+	p_stmt.Reset();
 	return;
     }
     
@@ -529,6 +539,7 @@ NODE_API_FUNC( Connection::prepare )
 	return;
     }
     args.GetReturnValue().Set( p_stmt );
+	p_stmt.Reset();
 }
 
 
@@ -556,6 +567,7 @@ struct connectBaton {
     ~connectBaton() {
 	obj = NULL;
 	sqlca = NULL;
+	callback.Reset();
     }
     
 };
@@ -979,6 +991,7 @@ struct dropBaton {
     
     ~dropBaton() {
 	obj = NULL;
+	callback.Reset();
     }
 };
 
