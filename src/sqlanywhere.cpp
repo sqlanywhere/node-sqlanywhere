@@ -181,7 +181,7 @@ void executeAfter( uv_work_t *req )
     executeBaton *baton = static_cast<executeBaton*>( req->data );
     Persistent<Value> ResultSet;
     fillResult( baton, ResultSet );
-	ResultSet.Reset();
+    ResultSet.Reset();
 
     scoped_lock	lock( baton->obj->conn_mutex );
 
@@ -199,7 +199,7 @@ void executeAfter( uv_work_t *req )
 NODE_API_FUNC( StmtObject::exec )
 /*******************************/
 {
-	Isolate *isolate = args.GetIsolate();
+    Isolate *isolate = args.GetIsolate();
     HandleScope scope( isolate );
     StmtObject *obj = ObjectWrap::Unwrap<StmtObject>( args.This() );
     int num_args = args.Length();
@@ -208,7 +208,7 @@ NODE_API_FUNC( StmtObject::exec )
     Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
     
     if( num_args == 0 ) {
-
+	
     } else if( num_args == 1 && args[0]->IsArray() ) {
 	bind_required = true;
 
@@ -281,8 +281,7 @@ NODE_API_FUNC( StmtObject::exec )
 	return;
     }
     args.GetReturnValue().Set( ResultSet );
-
-	ResultSet.Reset();
+    ResultSet.Reset();
 }
 
 
@@ -356,15 +355,15 @@ NODE_API_FUNC( Connection::exec )
     req->data = baton;
     
     if( callback_required ) {
-		Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-		baton->callback.Reset( isolate, callback );
-		int status;
-		status = uv_queue_work( uv_default_loop(), req, executeWork,
-					(uv_after_work_cb)executeAfter );
-		assert(status == 0);
+	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
+	baton->callback.Reset( isolate, callback );
+	int status;
+	status = uv_queue_work( uv_default_loop(), req, executeWork,
+				(uv_after_work_cb)executeAfter );
+	assert(status == 0);
 	
-		args.GetReturnValue().SetUndefined();
-		return;
+	args.GetReturnValue().SetUndefined();
+	return;
     }
     
     Persistent<Value> ResultSet;
@@ -385,8 +384,7 @@ NODE_API_FUNC( Connection::exec )
     }
     Local<Value> local_result = Local<Value>::New( isolate, ResultSet );
     args.GetReturnValue().Set( local_result );
-
-	ResultSet.Reset();
+    ResultSet.Reset();
 }
 
 struct prepareBaton {
@@ -539,7 +537,7 @@ NODE_API_FUNC( Connection::prepare )
 	return;
     }
     args.GetReturnValue().Set( p_stmt );
-	p_stmt.Reset();
+    p_stmt.Reset();
 }
 
 

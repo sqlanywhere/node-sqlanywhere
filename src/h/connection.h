@@ -367,7 +367,7 @@ class Connection : public ObjectWrap
      *
      * @fn Statement Connection::prepare( String sql, Function callback )
      *
-     * @param sql The SQL statement to be executed. ( type: Function )
+     * @param sql The SQL statement to be executed. ( type: String )
      * @param callback The optional callback function. ( type: Function )
      *
      * @return If no callback is specified, a Statement object is returned.
