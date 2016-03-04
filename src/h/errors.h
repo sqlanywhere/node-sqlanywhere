@@ -1,5 +1,5 @@
 // ***************************************************************************
-// Copyright (c) 2015 SAP SE or an SAP affiliate company. All rights reserved.
+// Copyright (c) 2016 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
 #define JS_ERR_INVALID_OBJECT				-2001
 #define JS_ERR_INVALID_ARGUMENTS			-2002

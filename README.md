@@ -31,7 +31,8 @@ var conn_params = {
 };
 
 
-conn.connect(conn_params, function() {
+conn.connect(conn_params, function(err) {
+  if (err) throw err;
   conn.exec('SELECT Name, Description FROM Products WHERE id = ?', [301], function (err, result) {
     if (err) throw err;
 

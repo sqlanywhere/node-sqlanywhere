@@ -1,5 +1,5 @@
 // ***************************************************************************
-// Copyright (c) 2015 SAP SE or an SAP affiliate company. All rights reserved.
+// Copyright (c) 2016 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
 #include "nodever_cover.h"
 
@@ -62,8 +62,6 @@ struct executeBaton {
 	    }
         }
 	params.clear();
-	callback.Dispose();
-	callback.Clear();
     }
 };
 
@@ -365,10 +363,6 @@ struct prepareBaton {
     
     ~prepareBaton() {
 	obj = NULL;
-	callback.Dispose();
-	callback.Clear();
-	StmtObj.Dispose();
-	StmtObj.Clear();
     }
 };
 
@@ -507,8 +501,6 @@ struct connectBaton {
     ~connectBaton() {
 	obj = NULL;
 	sqlca = NULL;
-	callback.Dispose();
-	callback.Clear();
     }
     
 };
@@ -663,7 +655,6 @@ Handle<Value> Connection::connect( const Arguments &args )
 	    baton->conn_string.append( ";" );
 	    baton->conn_string.append(*param0);
 	    arg_string.Dispose();
-	    arg_string.Clear();
 	}
 	baton->conn_string.append( ";CHARSET='UTF-8'" );
     }
@@ -900,8 +891,6 @@ struct dropBaton {
     
     ~dropBaton() {
 	obj = NULL;
-	callback.Dispose();
-	callback.Clear();
     }
 };
 
