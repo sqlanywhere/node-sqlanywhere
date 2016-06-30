@@ -186,9 +186,7 @@ void executeAfter( uv_work_t *req )
     scoped_lock	lock( baton->obj->conn_mutex );
 
     if( baton->sqlany_stmt != NULL && baton->prepared_stmt ) {
-     	if( api.initialized ) {
-	    api.sqlany_free_stmt( baton->sqlany_stmt );
-	}
+	// the StmtObject will free sqlany_stmt
 	baton->sqlany_stmt = NULL;
     }
 
@@ -373,6 +371,7 @@ NODE_API_FUNC( Connection::exec )
 
     if( baton->sqlany_stmt != NULL ) {
 	api.sqlany_free_stmt( baton->sqlany_stmt );
+	baton->sqlany_stmt = NULL;
     }
     
     delete baton;
@@ -774,8 +773,6 @@ void Connection::disconnectWork( uv_work_t *req )
     }
     // Must free the connection object or there will be a memory leak 
     api.sqlany_free_connection( baton->obj->conn );
-
-
     baton->obj->conn = NULL;
     openConnections--;
 
