@@ -20,7 +20,7 @@ struct executeBaton {
     
     Connection 				*obj;
     a_sqlany_stmt 			*sqlany_stmt;
-    bool				prepared_stmt;
+    bool				free_stmt;
     std::string				stmt;
     std::vector<char*> 			string_vals;
     std::vector<double*> 		num_vals;
@@ -38,12 +38,14 @@ struct executeBaton {
 	obj = NULL;
 	sqlany_stmt = NULL;
 	rows_affected = -1;
-	prepared_stmt = false;
+	free_stmt = false;
     }
 
     ~executeBaton() {
 	obj = NULL;
-	// the StmtObject will free sqlany_stmt
+	if( sqlany_stmt != NULL && free_stmt ) {
+	    api.sqlany_free_stmt( sqlany_stmt );
+	}
 	sqlany_stmt = NULL;
 	CLEAN_STRINGS( string_vals );
 	CLEAN_STRINGS( colNames );
@@ -110,7 +112,6 @@ void executeWork( uv_work_t *req )
 	    getErrorMsg( baton->obj->conn, baton->error_msg );
 	    return;
 	}
-	baton->prepared_stmt = true;
 	
     } else if( baton->sqlany_stmt == NULL ) {
 	baton->err = true;
@@ -185,8 +186,8 @@ void executeAfter( uv_work_t *req )
 
     scoped_lock	lock( baton->obj->conn_mutex );
 
-    if( baton->sqlany_stmt != NULL && baton->prepared_stmt ) {
-	// the StmtObject will free sqlany_stmt
+    if( baton->sqlany_stmt != NULL && baton->free_stmt ) {
+	api.sqlany_free_stmt( baton->sqlany_stmt );
 	baton->sqlany_stmt = NULL;
     }
 
@@ -237,6 +238,7 @@ NODE_API_FUNC( StmtObject::exec )
     executeBaton *baton = new executeBaton();
     baton->obj = obj->connection;
     baton->sqlany_stmt = obj->sqlany_stmt;
+    baton->free_stmt = false;
     baton->callback_required = callback_required;
     
     if( bind_required ) {
@@ -335,6 +337,7 @@ NODE_API_FUNC( Connection::exec )
     baton->sqlany_stmt = NULL;
     baton->obj = obj;
     baton->callback_required = callback_required;
+    baton->free_stmt = true;
     baton->stmt = std::string(*param0);
     
     if( bind_required ) {
