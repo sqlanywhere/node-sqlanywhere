@@ -481,4 +481,11 @@ class Connection : public ObjectWrap
     uv_mutex_t 		conn_mutex;
     /// @internal
     Persistent<String>	_arg;
+    /// @internal
+    std::vector<void*>	statements;
+
+    /// @internal
+    void removeStmt( class StmtObject *stmt );
+    /// @internal
+    void cleanupStmts( void );
 };

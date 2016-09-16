@@ -22,8 +22,9 @@ struct executeBaton {
     bool 				callback_required;
     
     Connection 				*obj;
-    a_sqlany_stmt 			*sqlany_stmt;
-    bool				prepared_stmt;
+    StmtObject				*stmt_obj;
+
+    bool				free_stmt;
     std::string				stmt;
     std::vector<char*> 			string_vals;
     std::vector<double*> 		num_vals;
@@ -39,15 +40,17 @@ struct executeBaton {
 	err = false;
 	callback_required = false;
 	obj = NULL;
-	sqlany_stmt = NULL;
+	stmt_obj = NULL;
 	rows_affected = -1;
-	prepared_stmt = false;
+	free_stmt = false;
     }
 
     ~executeBaton() {
 	obj = NULL;
-	// the StmtObject will free sqlany_stmt
-	sqlany_stmt = NULL;
+	if( stmt_obj != NULL && free_stmt ) {
+	    delete stmt_obj;
+	    stmt_obj = NULL;
+	}
 	CLEAN_STRINGS( string_vals );
 	CLEAN_STRINGS( colNames );
 	CLEAN_NUMS( num_vals );
@@ -94,22 +97,31 @@ void executeWork( uv_work_t *req )
 	return;
     }
     
-    if( baton->sqlany_stmt == NULL && baton->stmt.length() > 0 ) {
-	baton->sqlany_stmt = api.sqlany_prepare( baton->obj->conn, baton->stmt.c_str() );
-	if( baton->sqlany_stmt == NULL ) {
+    a_sqlany_stmt *sqlany_stmt = NULL;
+    if( baton->stmt_obj == NULL ) {
+	baton->stmt_obj = new StmtObject();
+	baton->stmt_obj->connection = baton->obj;
+	baton->obj->statements.push_back( baton->stmt_obj );
+    } else {
+	sqlany_stmt = baton->stmt_obj->sqlany_stmt;
+    }
+
+    if( sqlany_stmt == NULL && baton->stmt.length() > 0 ) {
+	sqlany_stmt = api.sqlany_prepare( baton->obj->conn, baton->stmt.c_str() );
+	if( sqlany_stmt == NULL ) {
 	    baton->err = true;
 	    getErrorMsg( baton->obj->conn, baton->error_msg );
 	    return;
 	}
-	baton->prepared_stmt = true;
+	baton->stmt_obj->sqlany_stmt = sqlany_stmt;
 	
-    } else if( baton->sqlany_stmt == NULL ) {
+    } else if( sqlany_stmt == NULL ) {
 	baton->err = true;
 	getErrorMsg( JS_ERR_INVALID_OBJECT, baton->error_msg );
 	return;
     }
     
-    if( !api.sqlany_reset( baton->sqlany_stmt) ) {
+    if( !api.sqlany_reset( sqlany_stmt) ) {
 	baton->err = true;
 	getErrorMsg( baton->obj->conn, baton->error_msg );
 	return;
@@ -118,7 +130,7 @@ void executeWork( uv_work_t *req )
     for( unsigned int i = 0; i < baton->params.size(); i++ ) {
 	a_sqlany_bind_param 	param;
 	
-	if( !api.sqlany_describe_bind_param( baton->sqlany_stmt, i, &param ) ) {
+	if( !api.sqlany_describe_bind_param( sqlany_stmt, i, &param ) ) {
 	    baton->err = true;
 	    getErrorMsg( baton->obj->conn, baton->error_msg );
 	    return;
@@ -136,14 +148,14 @@ void executeWork( uv_work_t *req )
 	    param.value.is_null = baton->params[i].value.is_null;
 	}
 	
-	if( !api.sqlany_bind_param( baton->sqlany_stmt, i, &param ) ) {
+	if( !api.sqlany_bind_param( sqlany_stmt, i, &param ) ) {
 	    baton->err = true;
 	    getErrorMsg( baton->obj->conn, baton->error_msg );
 	    return;
 	}
     }
     
-    sacapi_bool success_execute = api.sqlany_execute( baton->sqlany_stmt );
+    sacapi_bool success_execute = api.sqlany_execute( sqlany_stmt );
     CLEAN_STRINGS( baton->string_vals );
     CLEAN_NUMS( baton->int_vals );
     CLEAN_NUMS( baton->num_vals );
@@ -155,7 +167,7 @@ void executeWork( uv_work_t *req )
 	return;
     }
     
-    if( !fetchResultSet( baton->sqlany_stmt, baton->rows_affected, baton->colNames, baton->string_vals, baton->num_vals, baton->int_vals, baton->string_len, baton->col_types ) ) {
+    if( !fetchResultSet( sqlany_stmt, baton->rows_affected, baton->colNames, baton->string_vals, baton->num_vals, baton->int_vals, baton->string_len, baton->col_types ) ) {
 	baton->err = true;
 	getErrorMsg( baton->obj->conn, baton->error_msg );
 	return;
@@ -167,15 +179,6 @@ void executeAfter( uv_work_t *req )
     executeBaton *baton = static_cast<executeBaton*>( req->data );
     Local<Value> ResultSet;
     fillResult( baton, ResultSet );
-
-    scoped_lock	lock( baton->obj->conn_mutex );
-
-    if( baton->sqlany_stmt != NULL && baton->prepared_stmt ) {
-     	if( api.initialized ) {
-	    api.sqlany_free_stmt( baton->sqlany_stmt );
-	}
-	baton->sqlany_stmt = NULL;
-    }
 
     delete baton;
     delete req;
@@ -208,7 +211,8 @@ Handle<Value> StmtObject::exec( const Arguments &args )
 	return scope.Close( Undefined() );
     }
     
-    if( obj == NULL || obj->connection == NULL || obj->connection->conn == NULL || obj->sqlany_stmt == NULL ) {
+    if( obj == NULL || obj->connection == NULL || obj->connection->conn == NULL ||
+	obj->sqlany_stmt == NULL ) {
 	std::string error_msg;
 	getErrorMsg( JS_ERR_INVALID_OBJECT, error_msg );
 	callBack( &( error_msg ), args[cbfunc_arg] , Local<Value>::New( Undefined() ), callback_required );
@@ -217,7 +221,8 @@ Handle<Value> StmtObject::exec( const Arguments &args )
     
     executeBaton *baton = new executeBaton();
     baton->obj = obj->connection;
-    baton->sqlany_stmt = obj->sqlany_stmt;
+    baton->stmt_obj = obj;
+    baton->free_stmt = false;
     baton->callback_required = callback_required;
     
     if( bind_required ) {
@@ -287,7 +292,7 @@ Handle<Value> Connection::exec( const Arguments &args )
 	return scope.Close( Undefined() );
     }
 
-    Connection 			*obj = ObjectWrap::Unwrap<Connection>( args.This() );
+    Connection	*obj = ObjectWrap::Unwrap<Connection>( args.This() );
     
     if( obj == NULL || obj->conn == NULL ) {
 	std::string error_msg;
@@ -299,9 +304,10 @@ Handle<Value> Connection::exec( const Arguments &args )
     String::Utf8Value 		param0( args[0]->ToString() );
     
     executeBaton *baton = new executeBaton();
-    baton->sqlany_stmt = NULL;
     baton->obj = obj;
     baton->callback_required = callback_required;
+    baton->free_stmt = true;
+    baton->stmt_obj = NULL;
     baton->stmt = std::string(*param0);
     
     if( bind_required ) {
@@ -332,10 +338,6 @@ Handle<Value> Connection::exec( const Arguments &args )
     executeWork( req );
     bool success = fillResult( baton, ResultSet );
 
-    if( baton->sqlany_stmt != NULL ) {
-	api.sqlany_free_stmt( baton->sqlany_stmt );
-    }
-    
     delete baton;
     delete req;
     
@@ -689,6 +691,8 @@ void Connection::disconnectWork( uv_work_t *req )
 	return;
     }
     
+    baton->obj->cleanupStmts();
+
     if( !baton->obj->sqlca_connection ) {
 	api.sqlany_disconnect( baton->obj->conn );
     }
@@ -916,14 +920,8 @@ void StmtObject::dropWork( uv_work_t *req )
     dropBaton *baton = static_cast<dropBaton*>(req->data);
     scoped_lock lock( baton->obj->connection->conn_mutex );
     
-    if( baton->obj->sqlany_stmt != NULL ) {
-	api.sqlany_free_stmt( baton->obj->sqlany_stmt );
-    }
-    
-    baton->obj->sqlany_stmt = NULL;
-    baton->obj->connection = NULL;
-
-    
+    baton->obj->cleanup();
+    baton->obj->removeConnection();
 }
 
 Handle<Value> StmtObject::drop( const Arguments &args ) 

@@ -35,7 +35,10 @@ class StmtObject : public node::ObjectWrap
     StmtObject();
     /// @internal
     ~StmtObject();
-	
+    /// @internal
+    void cleanup( void );
+    void removeConnection( void );
+
   private:
     /// @internal
     static Persistent<Function> constructor;
@@ -134,5 +137,4 @@ class StmtObject : public node::ObjectWrap
     Connection		*connection;
     /// @internal
     a_sqlany_stmt	*sqlany_stmt;
-	
 };

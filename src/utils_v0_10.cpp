@@ -532,9 +532,8 @@ StmtObject::StmtObject()
 }
 StmtObject::~StmtObject() 
 {
-    if( sqlany_stmt != NULL ) {
-	api.sqlany_free_stmt( sqlany_stmt );
-    }
+    cleanup();
+    removeConnection();
 }
 
 Persistent<Function> StmtObject::constructor;
@@ -574,6 +573,24 @@ Handle<Value> StmtObject::NewInstance( const Arguments &args )
     return scope.Close( instance );
 }
 
+
+void StmtObject::cleanup( void )
+/******************************/
+{
+    if( sqlany_stmt != NULL ) {
+	api.sqlany_free_stmt( sqlany_stmt );
+	sqlany_stmt = NULL;
+    }
+}
+
+void StmtObject::removeConnection( void )
+/***************************************/
+{
+    if( connection != NULL ) {
+	connection->removeStmt( this );
+    	connection = NULL;
+    }
+}
 
 // Connection Functions
 
@@ -692,6 +709,7 @@ Connection::~Connection()
     scoped_lock lock( conn_mutex );
 
     _arg.Dispose();
+    cleanupStmts();
     if( conn != NULL ) {
 	api.sqlany_disconnect( conn );
 	api.sqlany_free_connection( conn );
@@ -701,6 +719,29 @@ Connection::~Connection()
     
     cleanAPI();
 };
+
+void Connection::cleanupStmts( void )
+/***********************************/
+{
+    std::vector<void*>::iterator findit;
+    for( findit = statements.begin(); findit != statements.end(); findit++ ) {
+	StmtObject *s = reinterpret_cast<StmtObject*>(*findit);
+	s->cleanup();
+    }
+}
+
+void Connection::removeStmt( class StmtObject *stmt )
+/***************************************************/
+{
+    // caller must get mutex
+    std::vector<void*>::iterator findit;
+    for( findit = statements.begin(); findit != statements.end(); findit++ ) {
+	if( *findit == reinterpret_cast<void*>(stmt) ) {
+	    statements.erase( findit );
+	    return;
+	}
+    }
+}
 
 Persistent<Function> Connection::constructor;
 
