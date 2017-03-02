@@ -15,7 +15,7 @@ for additional prerequisites including Python 2.7, and C/C++ tool chain.
 The official version hosted on NPM includes precompiled libraries for Windows 
 (64-bit).
 
-As of version 1.0.6, the node-sqlanywhere driver supports node.js v0.10, 0.12, 4.x, and 5.x. As of version 1.0.9, it also supports node.js v6.x.
+As of version 1.0.6, the node-sqlanywhere driver supports node.js v0.10, 0.12, 4.x, and 5.x. As of version 1.0.9, it also supports node.js v6.x and v7.x.
 
 ##Getting Started
 
