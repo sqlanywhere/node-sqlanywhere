@@ -1,3 +1,6 @@
+// ***************************************************************************
+// Copyright (c) 2017 SAP SE or an SAP affiliate company. All rights reserved.
+// ***************************************************************************
 var db = null;
 var exec = require('child_process').exec;
 exec( "rm ./build/Release/sqlanywhere.node", function( error, out, err ) {

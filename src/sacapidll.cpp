@@ -1,5 +1,5 @@
 // ***************************************************************************
-// Copyright (c) 2016 SAP SE or an SAP affiliate company. All rights reserved.
+// Copyright (c) 2017 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
 //====================================================
 //   Licensed under the Apache License, Version 2.0 (the "License");

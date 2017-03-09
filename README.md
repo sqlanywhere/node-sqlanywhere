@@ -2,6 +2,7 @@
 This is a Node.js driver written for [SAP SQL Anywhere](http://www.sap.com/pc/tech/database/software/sybase-sql-anywhere/index.html).
 
 [![NPM](https://nodei.co/npm/sqlanywhere.png?compact=true)](https://nodei.co/npm/sqlanywhere/)
+
 ##Install
 ```
 npm install sqlanywhere

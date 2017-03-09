@@ -1,5 +1,5 @@
 // ***************************************************************************
-// Copyright (c) 2016 SAP SE or an SAP affiliate company. All rights reserved.
+// Copyright (c) 2017 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
 #include "nodever_cover.h"
 
@@ -682,7 +682,7 @@ Handle<Value> Connection::connect( const Arguments &args )
 // Disconnect Function
 void Connection::disconnectWork( uv_work_t *req ) 
 {
-    scoped_lock api_lock(api_mutex );
+    scoped_lock api_lock( api_mutex );
     noParamBaton *baton = static_cast<noParamBaton*>(req->data);
     scoped_lock lock( baton->obj->conn_mutex );
     
@@ -698,7 +698,6 @@ void Connection::disconnectWork( uv_work_t *req )
     }
     // Must free the connection object or there will be a memory leak 
     api.sqlany_free_connection( baton->obj->conn );
-
 
     baton->obj->conn = NULL;
     openConnections--;
