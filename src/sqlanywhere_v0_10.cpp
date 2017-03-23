@@ -20,16 +20,14 @@ struct executeBaton {
     bool 				err;
     std::string 			error_msg;
     bool 				callback_required;
-    
+    unsigned				num_rows;
+
     Connection 				*obj;
     StmtObject				*stmt_obj;
 
     bool				free_stmt;
     std::string				stmt;
-    std::vector<char*> 			string_vals;
-    std::vector<double*> 		num_vals;
-    std::vector<int*> 			int_vals;
-    std::vector<size_t*> 		string_len;
+    std::vector<ExecuteData *>		execData;
     std::vector<a_sqlany_bind_param> 	params;
     
     std::vector<char*> 			colNames;
@@ -43,6 +41,7 @@ struct executeBaton {
 	stmt_obj = NULL;
 	rows_affected = -1;
 	free_stmt = false;
+	num_rows = 0;
     }
 
     ~executeBaton() {
@@ -51,20 +50,10 @@ struct executeBaton {
 	    delete stmt_obj;
 	    stmt_obj = NULL;
 	}
-	CLEAN_STRINGS( string_vals );
-	CLEAN_STRINGS( colNames );
-	CLEAN_NUMS( num_vals );
-	CLEAN_NUMS( int_vals );
-	CLEAN_NUMS( string_len );
 	col_types.clear();
-
-	for( size_t i = 0; i < params.size(); i++ ) {
-	    if( params[i].value.is_null != NULL ) {
-		delete params[i].value.is_null;
-		params[i].value.is_null = NULL;
-	    }
-        }
 	params.clear();
+	CLEAN_STRINGS( colNames );
+	CLEAN_PTRS( execData );
     }
 };
 
@@ -76,7 +65,8 @@ bool fillResult( executeBaton *baton, Local<Value> &ResultSet )
 	return false;
     }
     
-    if( !getResultSet( ResultSet, baton->rows_affected, baton->colNames, baton->string_vals, baton->num_vals, baton->int_vals, baton->string_len, baton->col_types ) ) {
+    if( !getResultSet( ResultSet, baton->rows_affected, baton->colNames,
+		       baton->execData[0], baton->col_types ) ) {
 	getErrorMsg( JS_ERR_RESULTSET, baton->error_msg );
 	callBack( &( baton->error_msg ), baton->callback , Local<Value>::New( Undefined() ), baton->callback_required );
 	return false;
@@ -138,6 +128,7 @@ void executeWork( uv_work_t *req )
 	
 	param.value.type = baton->params[i].value.type;
 	param.value.buffer = baton->params[i].value.buffer;
+	param.value.is_address = baton->params[i].value.is_address;
 	
 	if( param.value.type == A_STRING || param.value.type == A_BINARY ) {
 	    param.value.length = baton->params[i].value.length;
@@ -155,11 +146,12 @@ void executeWork( uv_work_t *req )
 	}
     }
     
+    if( baton->num_rows > 1 ) {
+	api.sqlany_set_batch_size( sqlany_stmt, baton->num_rows );
+    }
+    
     sacapi_bool success_execute = api.sqlany_execute( sqlany_stmt );
-    CLEAN_STRINGS( baton->string_vals );
-    CLEAN_NUMS( baton->int_vals );
-    CLEAN_NUMS( baton->num_vals );
-    baton->string_len.clear();
+    baton->execData[0]->clear();
     
     if( !success_execute ) {
 	baton->err = true;
@@ -167,7 +159,8 @@ void executeWork( uv_work_t *req )
 	return;
     }
     
-    if( !fetchResultSet( sqlany_stmt, baton->rows_affected, baton->colNames, baton->string_vals, baton->num_vals, baton->int_vals, baton->string_len, baton->col_types ) ) {
+    if( !fetchResultSet( sqlany_stmt, baton->rows_affected, baton->colNames,
+			 baton->execData[0], baton->col_types ) ) {
 	baton->err = true;
 	getErrorMsg( baton->obj->conn, baton->error_msg );
 	return;
@@ -178,6 +171,17 @@ void executeAfter( uv_work_t *req )
 {
     executeBaton *baton = static_cast<executeBaton*>( req->data );
     Local<Value> ResultSet;
+
+    // We must free the statement here (before we delete the baton) since it will
+    // make a request. If we're executing the statement asynchronously, the
+    // callback will be spawned (on a different thread) by fillResult. If the
+    // callback makes another request to the database, we could have multiple
+    // requests on the same connection at the same time, which is not allowed.
+    if( baton->stmt_obj != NULL && baton->free_stmt ) {
+	delete baton->stmt_obj;
+	baton->stmt_obj = NULL;
+    }
+
     fillResult( baton, ResultSet );
 
     delete baton;
@@ -226,12 +230,28 @@ Handle<Value> StmtObject::exec( const Arguments &args )
     baton->callback_required = callback_required;
     
     if( bind_required ) {
-	if( !getBindParameters( baton->string_vals, baton->num_vals, baton->int_vals, baton->string_len, args[0], baton->params ) ) {
+	if( !getBindParameters( baton->execData, args[0], baton->params,
+				baton->num_rows ) ) {
+	    delete baton;
 	    std::string error_msg;
 	    getErrorMsg( JS_ERR_BINDING_PARAMETERS, error_msg );
-	    callBack( &( error_msg ), args[cbfunc_arg] , Local<Value>::New( Undefined() ), callback_required );
+	    callBack( &( error_msg ), args[cbfunc_arg],
+		      Local<Value>::New( Undefined() ), callback_required );
 	    return scope.Close( Undefined() );
 	}
+	if( baton->num_rows > 1 &&
+	    baton->obj->max_api_ver < SQLANY_API_VERSION_4 ) {
+	    // can't support wide inserts with older dbcapi
+	    delete baton;
+	    std::string error_msg;
+	    getErrorMsg( JS_ERR_NO_WIDE_STATEMENTS, error_msg );
+	    callBack( &( error_msg ), args[cbfunc_arg],
+		      Local<Value>::New( Undefined() ), callback_required );
+	    return scope.Close( Undefined() );
+	}
+    } else {
+	baton->execData.push_back( new ExecuteData );
+	baton->num_rows = 1;
     }
 
     uv_work_t *req = new uv_work_t();
@@ -261,6 +281,136 @@ Handle<Value> StmtObject::exec( const Arguments &args )
     return scope.Close( ResultSet );
 }
 
+void getMoreResultsWork( uv_work_t *req )
+/***************************************/
+{
+    executeBaton *baton = static_cast<executeBaton*>(req->data);
+    scoped_lock lock( baton->obj->conn_mutex );
+
+    if( baton->obj->conn == NULL ) {
+	baton->err = true;
+	getErrorMsg( JS_ERR_NOT_CONNECTED, baton->error_msg );
+	return;
+    }
+
+    a_sqlany_stmt *stmt = baton->stmt_obj->sqlany_stmt;
+
+    if( stmt == NULL ) {
+	baton->err = true;
+	getErrorMsg( JS_ERR_INVALID_OBJECT, baton->error_msg );
+	return;
+    }
+    int retval = ( api.sqlany_get_next_result( stmt ) != 0 );
+    if( !retval ) {
+	char buffer[SACAPI_ERROR_SIZE];
+	int rc;
+	rc = api.sqlany_error( baton->obj->conn, buffer, sizeof(buffer) );
+	if( rc != 105 ) {
+	    // rc == 105 means "procedure has completed" - i.e. no more result
+	    // sets. Just return null, not an error
+	    baton->err = true;
+	    getErrorMsg( baton->obj->conn, baton->error_msg );
+	}
+	return;
+    }
+
+    baton->execData[0]->clear();
+    if( !fetchResultSet( stmt, baton->rows_affected, baton->colNames,
+			 baton->execData[0], baton->col_types ) ) {
+	baton->err = true;
+	getErrorMsg( baton->obj->conn, baton->error_msg );
+	return;
+    }
+}
+
+void getMoreResultsAfter( uv_work_t *req )
+/****************************************/
+{
+    HandleScope scope;
+    executeBaton *baton = static_cast<executeBaton*>( req->data );
+    Local<Value> ResultSet;
+
+    // We must free the statement here (before we delete the baton) since it will
+    // make a request. If we're executing the statement asynchronously, the
+    // callback will be spawned (on a different thread) by fillResult. If the
+    // callback makes another request to the database, we could have multiple
+    // requests on the same connection at the same time, which is not allowed.
+    if( baton->stmt_obj != NULL && baton->free_stmt ) {
+	delete baton->stmt_obj;
+	baton->stmt_obj = NULL;
+    }
+
+    fillResult( baton, ResultSet );
+
+    delete baton;
+    delete req;
+}
+
+NODE_API_FUNC( StmtObject::getMoreResults )
+/*****************************************/
+{
+    HandleScope scope;
+    StmtObject *obj = ObjectWrap::Unwrap<StmtObject>( args.This() );
+    int num_args = args.Length();
+    bool callback_required = false;
+    int cbfunc_arg = -1;
+    
+    if( num_args == 0 ) {
+	
+    } else if( num_args == 1 && args[0]->IsFunction() ) {
+	callback_required = true;
+	cbfunc_arg = 0;
+
+    } else {
+	throwError( JS_ERR_INVALID_ARGUMENTS );
+	return scope.Close( Undefined() );
+    }
+    
+    if( obj == NULL || obj->connection == NULL || obj->connection->conn == NULL ||
+	obj->sqlany_stmt == NULL ) {
+	std::string error_msg;
+	getErrorMsg( JS_ERR_INVALID_OBJECT, error_msg );
+	callBack( &( error_msg ), args[cbfunc_arg],
+		  Local<Value>::New( Undefined() ), callback_required );
+	return scope.Close( Undefined() );
+    }
+
+    executeBaton *baton = new executeBaton;
+    baton->obj = obj->connection;
+    baton->stmt_obj = obj;
+    baton->free_stmt = false;
+    baton->callback_required = callback_required;
+
+    baton->execData.push_back( new ExecuteData );
+    baton->num_rows = 1;
+
+    uv_work_t *req = new uv_work_t();
+    req->data = baton;
+    
+    if( callback_required ) {
+	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
+	baton->callback = Persistent<Function>::New( callback );
+	
+	int status;
+	status = uv_queue_work( uv_default_loop(), req, getMoreResultsWork,
+				(uv_after_work_cb)getMoreResultsAfter );
+	assert(status == 0);
+	
+	return scope.Close( Undefined() );
+    }
+    
+    Local<Value> ResultSet;
+    
+    getMoreResultsWork( req );
+    bool success = fillResult( baton, ResultSet );
+    delete baton;
+    delete req;
+    
+    if( !success ) {
+	return scope.Close( Undefined() );
+    }
+    return scope.Close( ResultSet );
+}
 
 Handle<Value> Connection::exec( const Arguments &args ) 
 {
@@ -311,12 +461,28 @@ Handle<Value> Connection::exec( const Arguments &args )
     baton->stmt = std::string(*param0);
     
     if( bind_required ) {
-	if( !getBindParameters( baton->string_vals, baton->num_vals, baton->int_vals, baton->string_len, args[1], baton->params ) ) {
+	if( !getBindParameters( baton->execData, args[1], baton->params,
+				baton->num_rows ) ) {
+	    delete baton;
 	    std::string error_msg;
 	    getErrorMsg( JS_ERR_BINDING_PARAMETERS, error_msg );
-	    callBack( &( error_msg ), args[cbfunc_arg] , Local<Value>::New( Undefined() ), callback_required );
+	    callBack( &( error_msg ), args[cbfunc_arg],
+		      Local<Value>::New( Undefined() ), callback_required );
 	    return scope.Close( Undefined() );
 	}
+	if( baton->num_rows > 1 &&
+	    baton->obj->max_api_ver < SQLANY_API_VERSION_4 ) {
+	    // can't support wide inserts with older dbcapi
+	    delete baton;
+	    std::string error_msg;
+	    getErrorMsg( JS_ERR_NO_WIDE_STATEMENTS, error_msg );
+	    callBack( &( error_msg ), args[cbfunc_arg],
+		      Local<Value>::New( Undefined() ), callback_required );
+	    return scope.Close( Undefined() );
+	}
+    } else {
+	baton->execData.push_back( new ExecuteData );
+	baton->num_rows = 1;
     }
     
     uv_work_t *req = new uv_work_t();
@@ -528,10 +694,22 @@ void Connection::connectWork( uv_work_t *req )
 	    return;
 	}
     
-	if( !api.sqlany_init( "Node.js", SQLANY_API_VERSION_2, &(baton->obj->max_api_ver) )) {
-            baton->err = true;
-	    getErrorMsg( JS_ERR_INITIALIZING_DBCAPI, baton->error_msg );
-	    return;
+	if( !api.sqlany_init( "Node.js", SQLANY_API_VERSION_4,
+			      &(baton->obj->max_api_ver) )) {
+	    // As long as the version is >= 2, we're OK. We just have to disable
+	    // wide inserts
+	    if( baton->obj->max_api_ver >= SQLANY_API_VERSION_2 ) {
+		if( !api.sqlany_init( "Node.js", baton->obj->max_api_ver,
+				      &(baton->obj->max_api_ver) )) {
+		    baton->err = true;
+		    getErrorMsg( JS_ERR_INITIALIZING_DBCAPI, baton->error_msg );
+		    return;
+		}
+	    } else {
+		baton->err = true;
+		getErrorMsg( JS_ERR_INITIALIZING_DBCAPI, baton->error_msg );
+		return;
+	    }
 	}
     }
     
@@ -876,6 +1054,16 @@ Handle<Value> Connection::rollback( const Arguments &args )
     rollbackWork( req );
     noParamAfter( req );
     return scope.Close( Undefined() );
+}
+
+Handle<Value> Connection::connected( const Arguments &args )
+/**********************************************************/
+{
+    HandleScope scope;
+    Connection *obj = ObjectWrap::Unwrap<Connection>( args.This() );
+    Local<Value> ret;
+    ret = Integer::New( obj->conn == NULL ? false : true );
+    return scope.Close( ret );
 }
 
 struct dropBaton {

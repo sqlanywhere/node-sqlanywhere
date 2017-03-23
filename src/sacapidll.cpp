@@ -1,25 +1,26 @@
 // ***************************************************************************
 // Copyright (c) 2017 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
-//====================================================
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// http://www.apache.org/licenses/LICENSE-2.0
 //
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //
-//   While not a requirement of the license, if you do modify this file, we
-//   would appreciate hearing about it. Please email
-//   sqlany_interfaces@sybase.com
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
-//====================================================
+// While not a requirement of the license, if you do modify this file, we
+// would appreciate hearing about it. Please email
+// sqlany_interfaces@sap.com
+//
+// ***************************************************************************
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -153,7 +154,7 @@ loaded:
     LookupSymbolAndCheck( api, sqlany_sqlstate );
     LookupSymbolAndCheck( api, sqlany_clear_error );
 
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /* We don't report an error if we don't find the v2 entry points.
        That allows the calling app to revert to v1 */
     LookupSymbol( api, sqlany_init_ex );
@@ -163,12 +164,29 @@ loaded:
     LookupSymbol( api, sqlany_client_version_ex );
     LookupSymbolAndCheck( api, sqlany_cancel );
 #endif
-#if _SACAPI_VERSION+0 >= 3
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_3
     /* We don't report an error if we don't find the v3 entry points.
        That allows the calling app to revert to v1 */
     LookupSymbol( api, sqlany_register_callback );
 #endif
-
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
+    /* We don't report an error if we don't find the v4 entry points.
+       That allows the calling app to revert to v1 */
+    LookupSymbol( api, sqlany_set_batch_size );
+    LookupSymbol( api, sqlany_set_param_bind_type );
+    LookupSymbol( api, sqlany_get_batch_size );
+    LookupSymbol( api, sqlany_set_rowset_size );
+    LookupSymbol( api, sqlany_get_rowset_size );
+    LookupSymbol( api, sqlany_set_column_bind_type );
+    LookupSymbol( api, sqlany_bind_column );
+    LookupSymbol( api, sqlany_clear_column_bindings );
+    LookupSymbol( api, sqlany_fetched_rows );
+    LookupSymbol( api, sqlany_set_rowset_pos );
+#endif
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
+    LookupSymbol( api, sqlany_reset_param_data );
+    LookupSymbol( api, sqlany_error_length );
+#endif
     api->initialized = 1;
     return 1;
 }

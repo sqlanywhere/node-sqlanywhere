@@ -42,6 +42,9 @@ void getErrorMsg( int code, std::string &str )
 	case JS_ERR_RESULTSET:
 	    message << "Error making result set Object";
 	    break;
+	case JS_ERR_NO_WIDE_STATEMENTS:
+	    message << "The DBCAPI library must be upgraded to support wide statements";
+	    break;
 	default:
 	    message << "Unknown Error";
     }
@@ -179,31 +182,148 @@ void callBack( std::string *		str,
     }
 }
 
-bool getBindParameters( std::vector<char*> &			string_params,
-			std::vector<double*> &			num_params,
-			std::vector<int*> &			int_params,
-			std::vector<size_t*> &			string_len,
-			Handle<Value> 				arg,
-			std::vector<a_sqlany_bind_param> &	params )
-/**********************************************************************/
+static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
+				   Handle<Value>			arg,
+				   std::vector<a_sqlany_bind_param> &	params,
+				   unsigned				&num_rows )
+/*********************************************************************************/
 {
-		   
-    Handle<Array>		bind_params = Handle<Array>::Cast( arg );
-    a_sqlany_bind_param 	param;
+    Handle<Array>	rows = Handle<Array>::Cast( arg );
+    num_rows = rows->Length();
+
+    Handle<Array>	row0 = Handle<Array>::Cast( rows->Get(0) );
+    unsigned		num_cols = row0->Length();
+    unsigned		c;
+
+    // Make sure that each array in the list has the same number and types
+    // of values
+    for( unsigned int r = 1; r < num_rows; r++ ) {
+	Handle<Array>	row = Handle<Array>::Cast( rows->Get(r) );
+	for( c = 0; c < num_cols; c++ ) {
+	    Handle<Value> val0 = row0->Get(c);
+	    Handle<Value> val = row->Get(c);
+
+	    if( ( val0->IsInt32() || val0->IsNumber() ) &&
+		( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
+		return false;
+	    }
+	    if( val0->IsString() &&
+		!val->IsString() && !val->IsNull() ) {
+		return false;
+	    }
+	    if( Buffer::HasInstance( val0 ) &&
+		!Buffer::HasInstance( val ) && !val->IsNull() ) {
+		return false;
+	    }
+	}
+    }
+
+    for( c = 0; c < num_cols; c++ ) {
+	a_sqlany_bind_param 	param;
+	memset( &param, 0, sizeof( param ) );
+
+	ExecuteData *ex = new ExecuteData;
+	execData.push_back( ex );
+
+	double *	param_double = new double[num_rows];
+	ex->addNum( param_double );
+	char **		char_arr = new char *[num_rows];
+	size_t *	len = new size_t[num_rows];
+	ex->addStrings( char_arr, len );
+	sacapi_bool *	is_null = new sacapi_bool[num_rows];
+	ex->addNull( is_null );
+	param.value.is_null	= is_null;
+	param.value.is_address	= false;
+
+	if( row0->Get(c)->IsInt32() || row0->Get(c)->IsNumber() ) {
+	    param.value.type	= A_DOUBLE;
+	    param.value.buffer	= (char *)( param_double );
+
+	} else if( row0->Get(c)->IsString() ) {
+	    param.value.type	= A_STRING;
+	    param.value.buffer	= (char *)char_arr;
+	    param.value.length	= len;
+	    param.value.is_address = true;
+
+	} else if( Buffer::HasInstance( row0->Get(c) ) ) {
+	    param.value.type	= A_BINARY;
+	    param.value.buffer	= (char *)char_arr;
+	    param.value.length	= len;
+	    param.value.is_address = true;
+	    
+	} else if( row0->Get(c)->IsNull() ) {
+
+	} else{
+	    return false;
+	}
+
+	for( unsigned int r = 0; r < num_rows; r++ ) {
+	    Handle<Array>	bind_params = Handle<Array>::Cast( rows->Get(r) );
+	
+	    is_null[r] = false;
+	    if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
+		param_double[r] = bind_params->Get(c)->NumberValue();
+	
+	    } else if( bind_params->Get(c)->IsString() ) {
+		String::Utf8Value paramValue( bind_params->Get(c)->ToString() );
+		const char* param_string = (*paramValue);
+		len[r] = (size_t)paramValue.length();
+		char *param_char = new char[len[r] + 1];
+		char_arr[r] = param_char;
+		memcpy( param_char, param_string, len[r] + 1 );
+		
+	    } else if( Buffer::HasInstance( bind_params->Get(c) ) ) {
+		len[r] = Buffer::Length( bind_params->Get(c) );
+		char *param_char = new char[len[r]];
+		char_arr[r] = param_char;
+		memcpy( param_char, Buffer::Data( bind_params->Get(c) ), len[r] );
+
+	    } else if( bind_params->Get(c)->IsNull() ) {
+		is_null[r] = true;
+	    }
+	}
     
+	params.push_back( param );
+    }
+
+    return true;	   
+}
+
+bool getBindParameters( std::vector<ExecuteData *>		&execData,
+			Handle<Value> 				arg,
+			std::vector<a_sqlany_bind_param> &	params,
+			unsigned				&num_rows )
+/*************************************************************************/
+{
+    Handle<Array>		bind_params = Handle<Array>::Cast( arg );
+
+    if( bind_params->Length() == 0 ) {
+	return true;
+    }
+
+    if( bind_params->Get(0)->IsArray() ) {
+	return getWideBindParameters( execData, arg, params, num_rows );
+    }
+    num_rows = 1;
+
+    ExecuteData *ex = new ExecuteData;
+    execData.push_back( ex );
+
     for( unsigned int i = 0; i < bind_params->Length(); i++ ) {
-	param.value.is_null = NULL;
+	a_sqlany_bind_param 	param;
+	memset( &param, 0, sizeof( param ) );
+
 	if( bind_params->Get(i)->IsInt32() ) {
 	    int *param_int = new int;
 	    *param_int = bind_params->Get(i)->Int32Value();
-	    int_params.push_back( param_int );
+	    ex->addInt( param_int );
 	    param.value.buffer = (char *)( param_int );
 	    param.value.type   = A_VAL32;
 	    
 	} else if( bind_params->Get(i)->IsNumber() ) {
 	    double *param_double = new double;
 	    *param_double = bind_params->Get(i)->NumberValue(); // Remove Round off Error
-	    num_params.push_back( param_double );
+	    ex->addNum( param_double );
 	    param.value.buffer = (char *)( param_double );
 	    param.value.type   = A_DOUBLE;
 	
@@ -213,11 +333,12 @@ bool getBindParameters( std::vector<char*> &			string_params,
 	    size_t *len = new size_t;
 	    *len = (size_t)paramValue.length();
 	    
+	    char **char_arr = new char *;
 	    char *param_char = new char[*len + 1];
-	    
+	    *char_arr = param_char;
+
 	    memcpy( param_char, param_string, ( *len ) + 1 );
-	    string_params.push_back( param_char );
-	    string_len.push_back( len );
+	    ex->addStrings( char_arr, len );
 	    
 	    param.value.type = A_STRING;
 	    param.value.buffer = param_char;
@@ -227,10 +348,12 @@ bool getBindParameters( std::vector<char*> &			string_params,
 	} else if( Buffer::HasInstance( bind_params->Get(i) ) ) {
 	    size_t *len = new size_t;
 	    *len = Buffer::Length( bind_params->Get(i) );
+	    char **char_arr = new char *;
 	    char *param_char = new char[*len];
+	    *char_arr = param_char;
+	    
 	    memcpy( param_char, Buffer::Data( bind_params->Get(i) ), *len );
-	    string_params.push_back( param_char );
-	    string_len.push_back( len );
+	    ex->addStrings( char_arr, len );
 	    
 	    param.value.type = A_BINARY;
 	    param.value.buffer = param_char;
@@ -239,8 +362,10 @@ bool getBindParameters( std::vector<char*> &			string_params,
 	    
 	} else if( bind_params->Get(i)->IsNull() ) {
 	    param.value.type = A_VAL32;
-	    param.value.is_null = new sacapi_bool;
-	    *param.value.is_null = true;
+	    sacapi_bool *is_null = new sacapi_bool;
+	    param.value.is_null = is_null;
+	    ex->addNull( is_null );
+	    is_null[0] = true;
 	    
 	} else{
 	    return false;
@@ -255,10 +380,7 @@ bool getBindParameters( std::vector<char*> &			string_params,
 bool getResultSet( Persistent<Value> &			Result,
 		   int &				rows_affected,
 		   std::vector<char *> &		colNames,
-		   std::vector<char*> &			string_vals,
-		   std::vector<double*> &		num_vals,
-		   std::vector<int*> &			int_vals,
-		   std::vector<size_t*> &		string_len,
+		   ExecuteData *			execData,
 		   std::vector<a_sqlany_data_type> &	col_types )
 /*****************************************************************/
 {
@@ -276,9 +398,9 @@ bool getResultSet( Persistent<Value> &			Result,
 	size_t count = 0;
 	size_t count_int = 0, count_num = 0, count_string = 0;
 	Local<Array> ResultSet = Array::New( isolate );
-	while( count_int < int_vals.size() || 
-	       count_num < num_vals.size() || 
-	       count_string < string_vals.size()  ) {
+	while( count_int < execData->intSize() ||
+	       count_num < execData->numSize() ||
+	       count_string < execData->stringSize() ) {
 	    Local<Object> curr_row = Object::New( isolate );
 	    num_rows++;
 	    for( size_t i = 0; i < num_cols; i++ ) {
@@ -293,15 +415,13 @@ bool getResultSet( Persistent<Value> &			Result,
 		    case A_UVAL16:
 		    case A_VAL8:
 		    case A_UVAL8:
-			if( int_vals[count_int] == NULL ) {
+			if( execData->intIsNull( count_int ) ) {
 			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
 					   Null( isolate ) );
 			} else {
 			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Integer::New( isolate, *int_vals[count_int] ) );
+					   Integer::New( isolate, execData->getInt( count_int ) ) );
 			}
-			delete int_vals[count_int];
-			int_vals[count_int] = NULL;
 			count_int++;
 			break;
 			
@@ -309,49 +429,43 @@ bool getResultSet( Persistent<Value> &			Result,
 		    case A_UVAL64:
 		    case A_VAL64:
 		    case A_DOUBLE:
-			if( num_vals[count_num] == NULL ) {
+			if( execData->numIsNull( count_num ) ) {
 			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
 					   Null( isolate ) );
 			} else {
 			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Number::New( isolate, *num_vals[count_num] ) );
+					   Number::New( isolate, execData->getNum( count_num ) ) );
 			}
-			delete num_vals[count_num];
-			num_vals[count_num] = NULL;
 			count_num++;
 			break;
 			
 		    case A_BINARY:
-			if( string_vals[count_string] == NULL ) {
+			if( execData->stringIsNull( count_string ) ) {
 			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
 					   Null( isolate ) );
 			} else {
 #if v012
 			    Local<Object> buf = node::Buffer::New( 
-				isolate, string_vals[count_string],
-				*string_len[count_string] ); 
+				isolate, execData->getString( count_string ),
+				execData->getLen( count_string ) ); 
 			    curr_row->Set( String::NewFromUtf8( isolate,
 								colNames[i] ),
 					   buf );
 #else
 			    MaybeLocal<Object> mbuf = node::Buffer::Copy( 
-				isolate, string_vals[count_string],
-				*string_len[count_string] ); 
+				isolate, execData->getString( count_string ),
+				execData->getLen( count_string ) ); 
 			    Local<Object> buf = mbuf.ToLocalChecked();
 #endif
 			    curr_row->Set( String::NewFromUtf8( isolate,
 								colNames[i] ),
 					   buf );
 			}
-			delete string_vals[count_string];
-			delete string_len[count_string];
-			string_vals[count_string] = NULL;
-			string_len[count_string] = NULL;
 			count_string++;
 			break;
 			
 		    case A_STRING:		    
-			if( string_vals[count_string] == NULL ) {
+			if( execData->stringIsNull( count_string ) ) {
 			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
 					   Null( isolate ) );
 			} else {
@@ -359,25 +473,21 @@ bool getResultSet( Persistent<Value> &			Result,
 								colNames[i] ),
 #if v012
 					   String::NewFromUtf8( isolate,
-								string_vals[count_string],
+								execData->getString( count_string ),
 								String::NewStringType::kNormalString,
-								*( (int*)string_len[count_string] ) )
+								(int)execData->getLen( count_string ) )
 #else
 					   String::NewFromUtf8( isolate,
-								string_vals[count_string],
+								execData->getString( count_string ),
 								NewStringType::kNormal,
-								*( (int*)string_len[count_string] ) ).ToLocalChecked() 
+								(int)execData->getLen( count_string ) ).ToLocalChecked()
 #endif
 				);
 			}
-			delete string_vals[count_string];
-			delete string_len[count_string];
-			string_vals[count_string] = NULL;
-			string_len[count_string] = NULL;
 			count_string++;
 			break;
-			
-                    default:
+		
+		    default:
 			return false;
 		}
 		count++;
@@ -396,10 +506,7 @@ bool getResultSet( Persistent<Value> &			Result,
 bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		     int &				rows_affected,
 		     std::vector<char *> &		colNames,
-		     std::vector<char*> &		string_vals,
-		     std::vector<double*> &		num_vals,
-		     std::vector<int*> &		int_vals,
-		     std::vector<size_t*> &		string_len,
+		     ExecuteData *			execData,
 		     std::vector<a_sqlany_data_type> &	col_types )
 /*****************************************************************/
 {
@@ -449,8 +556,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			*size = *(value.length);
 			char *val = new char[ *size ];
 			memcpy( val, value.buffer, *size );
-			string_vals.push_back( val );
-			string_len.push_back( size );
+			execData->addString( val, size );
 			count_string++;
 			break;
 		    }
@@ -461,8 +567,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			*size = (size_t)( (int)*(value.length) );
 			char *val = new char[ *size ];
 			memcpy( val, (char *)value.buffer, *size );
-			string_vals.push_back( val );
-			string_len.push_back( size );
+			execData->addString( val, size );
 			count_string++;
 			break;
 		    }
@@ -471,7 +576,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			double *val = new double;
 			*val = (double)*(long long *)value.buffer;
-			num_vals.push_back( val );
+			execData->addNum( val );
 			count_num++;
 			break;
 		    }
@@ -480,7 +585,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			double *val = new double;
 			*val = (double)*(unsigned long long *)value.buffer;
-			num_vals.push_back( val );
+			execData->addNum( val );
 			count_num++;
 			break;
 		    }
@@ -489,7 +594,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			int *val = new int;
 			*val = *(int*)value.buffer;
-			int_vals.push_back( val );
+			execData->addInt( val );
 			count_int++;
 			break;
 		    }
@@ -498,7 +603,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			double *val = new double;
 			*val = (double)*(unsigned int*)value.buffer;
-			num_vals.push_back( val );
+			execData->addNum( val );
 			count_num++;
 			break;
 		    }
@@ -507,7 +612,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			int *val = new int;
 			*val = (int)*(short*)value.buffer;
-			int_vals.push_back( val );
+			execData->addInt( val );
 			count_int++;
 			break;
 		    }
@@ -516,7 +621,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			int *val = new int;
 			*val = (int)*(unsigned short*)value.buffer;
-			int_vals.push_back( val );
+			execData->addInt( val );
 			count_int++;
 			break;
 		    }
@@ -525,7 +630,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			int *val = new int;
 			*val = (int)*(char *)value.buffer;
-			int_vals.push_back( val );
+			execData->addInt( val );
 			count_int++;
 			break;
 		    }
@@ -534,7 +639,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			int *val = new int;
 			*val = (int)*(unsigned char *)value.buffer;
-			int_vals.push_back( val );
+			execData->addInt( val );
 			count_int++;
 			break;
 		    }
@@ -543,7 +648,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    {
 			double *val = new double;
 			*val = (double)*(double *)value.buffer;
-			num_vals.push_back( val );
+			execData->addNum( val );
 			count_num++;
 			break;
 		    }
@@ -637,6 +742,7 @@ void StmtObject::Init( Isolate *isolate )
     // Prototype
     NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
     NODE_SET_PROTOTYPE_METHOD( tpl, "drop", drop );
+    NODE_SET_PROTOTYPE_METHOD( tpl, "getMoreResults", getMoreResults );
     constructor.Reset( isolate, tpl->GetFunction() );
 }
 
@@ -852,8 +958,11 @@ void Connection::Init( Isolate *isolate )
     NODE_SET_PROTOTYPE_METHOD( tpl, "prepare", prepare );
     NODE_SET_PROTOTYPE_METHOD( tpl, "connect", connect );
     NODE_SET_PROTOTYPE_METHOD( tpl, "disconnect", disconnect );
+    NODE_SET_PROTOTYPE_METHOD( tpl, "close", disconnect );
     NODE_SET_PROTOTYPE_METHOD( tpl, "commit", commit );
     NODE_SET_PROTOTYPE_METHOD( tpl, "rollback", rollback );
+    NODE_SET_PROTOTYPE_METHOD( tpl, "connected", connected );
+
     constructor.Reset( isolate, tpl->GetFunction() );
 }
 

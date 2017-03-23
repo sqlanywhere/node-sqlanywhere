@@ -469,7 +469,31 @@ class Connection : public ObjectWrap
 
     /// @internal
     static void rollbackWork( uv_work_t *req );
-    
+
+    /** Indicates whether the connection is connected.
+     *
+     * This synchronous method returns true if the connection is connected and
+     * false otherwise.
+     *
+     * The following example shows how to use this method.
+     *
+     * <p><pre>
+     * var sqlanywhere = require( 'sqlanywhere' );
+     * var client = sqlanywhere.createConnection();
+     * var connected = client.connected(); // false
+     * client.connect( "ServerName=demo17;UID=DBA;PWD=sql" )
+     * connected = client.connected(); // true
+     * client.disconnect();
+     * connected = client.connected(); // false
+     * </pre></p>
+     *
+     * @fn Connection::connected()
+     *
+     * @return true if the connection is connected, false if not.
+     *
+     */
+    static NODE_API_FUNC( connected );
+
   public:
     /// @internal
     a_sqlany_connection	*conn;

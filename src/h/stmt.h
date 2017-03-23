@@ -131,7 +131,43 @@ class StmtObject : public node::ObjectWrap
     static void dropAfter( uv_work_t *req );
     /// @internal
     static void dropWork( uv_work_t *req );
-    
+
+    /** Gets the next result set of a multi-result-set query.
+     *
+     * This method can be either synchronous or asynchronous depending on
+     * whether or not a callback function is specified.
+     * The callback function is of the form:
+     *
+     * <p><pre>
+     * function( err, res )
+     * {
+     *
+     * };
+     * </pre></p>
+     *
+     * The following synchronous example shows how to use the getMoreResults method
+     * on a prepared statement.
+     *
+     * <p><pre>
+     * var sqlanywhere = require( 'sqlanywhere' );
+     * var client = sqlanywhere.createConnection();
+     * client.connect( "ServerName=demo17;UID=DBA;PWD=sql" )
+     * stmt = client.prepare( "SELECT * FROM Customers WHERE ID = ?; SELECT * FROM Customers where ID = ?" );
+     * result = stmt.exec( [200, 300] );
+     * console.log( result ); // first query
+     * result = stmt.getMoreResults();
+     * console.log( result ); // second query
+     * stmt.drop();
+     * client.disconnect();
+     * </pre></p>
+     *
+     * @fn Statement::getMoreResults( Function callback )
+     *
+     * @param callback The optional callback function.
+     *
+     */
+    static NODE_API_FUNC( getMoreResults );
+
   public:
     /// @internal
     Connection		*connection;

@@ -17,7 +17,7 @@
 //
 // While not a requirement of the license, if you do modify this file, we
 // would appreciate hearing about it. Please email
-// sqlany_interfaces@sybase.com
+// sqlany_interfaces@sap.com
 //
 // ***************************************************************************
 
@@ -69,7 +69,7 @@ typedef sacapi_bool (*sqlany_client_version_func)( char * buffer, size_t len );
 typedef sacapi_i32 (*sqlany_error_func)( a_sqlany_connection * sqlany_conn, char * buffer, size_t size );
 typedef size_t (*sqlany_sqlstate_func)( a_sqlany_connection * sqlany_conn, char * buffer, size_t size );
 typedef void (*sqlany_clear_error_func)( a_sqlany_connection * sqlany_conn );
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     typedef a_sqlany_interface_context *(*sqlany_init_ex_func)( const char *app_name, sacapi_u32 api_version, sacapi_u32 *max_version );
     typedef void (*sqlany_fini_ex_func)( a_sqlany_interface_context *context );
     typedef a_sqlany_connection *(*sqlany_new_connection_ex_func)( a_sqlany_interface_context *context );
@@ -77,12 +77,24 @@ typedef void (*sqlany_clear_error_func)( a_sqlany_connection * sqlany_conn );
     typedef sacapi_bool (*sqlany_client_version_ex_func)( a_sqlany_interface_context *context, char *buffer, size_t len );
     typedef void (*sqlany_cancel_func)( a_sqlany_connection * sqlany_conn );
 #endif
-#if _SACAPI_VERSION+0 >= 3
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_3
     typedef sacapi_bool (*sqlany_register_callback_func)( a_sqlany_connection * sqlany_conn, a_sqlany_callback_type index, SQLANY_CALLBACK_PARM callback );
 #endif
-#if _SACAPI_VERSION+0 >= 4
-    typedef sacapi_bool (*sqlany_get_bind_param_info_ex_func)( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param_info * info, size_t size );
-    typedef sacapi_bool (*sqlany_get_column_info_ex_func)( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_column_info * buffer, size_t size );
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
+    typedef sacapi_bool (*sqlany_set_batch_size_func)( a_sqlany_stmt * sqlany_stmt, sacapi_u32 num_rows );
+    typedef sacapi_bool (*sqlany_set_param_bind_type_func)( a_sqlany_stmt * sqlany_stmt, size_t row_size );
+    typedef sacapi_u32 (*sqlany_get_batch_size_func)( a_sqlany_stmt * sqlany_stmt );
+    typedef sacapi_bool (*sqlany_set_rowset_size_func)( a_sqlany_stmt * sqlany_stmt, sacapi_u32 num_rows );
+    typedef sacapi_u32 (*sqlany_get_rowset_size_func)( a_sqlany_stmt * sqlany_stmt );
+    typedef sacapi_bool (*sqlany_set_column_bind_type_func)( a_sqlany_stmt * sqlany_stmt, size_t row_size );
+    typedef sacapi_bool (*sqlany_bind_column_func)( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_data_value * value );
+    typedef sacapi_bool (*sqlany_clear_column_bindings_func)( a_sqlany_stmt * sqlany_stmt );
+    typedef sacapi_i32 (*sqlany_fetched_rows_func)( a_sqlany_stmt * sqlany_stmt );
+    typedef sacapi_bool (*sqlany_set_rowset_pos_func)( a_sqlany_stmt * sqlany_stmt, sacapi_u32 row_num );
+#endif
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
+    typedef sacapi_bool (*sqlany_reset_param_data_func)( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index );
+    typedef size_t (*sqlany_error_length_func)( a_sqlany_connection * conn );
 #endif
 
 #if defined( __cplusplus )
@@ -245,7 +257,7 @@ typedef struct SQLAnywhereInterface {
      */
     function( sqlany_clear_error );		
 
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /** Pointer to ::sqlany_init_ex() function.
      */
     function( sqlany_init_ex );
@@ -270,19 +282,53 @@ typedef struct SQLAnywhereInterface {
      */
     function( sqlany_cancel );		
 #endif
-#if _SACAPI_VERSION+0 >= 3
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_3
     /** Pointer to ::sqlany_register_callback() function.
      */
     function( sqlany_register_callback );
 #endif
-#if _SACAPI_VERSION+0 >= 4
-    /** Pointer to ::sqlany_get_column_info_ex() function.
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
+    /** Pointer to ::sqlany_set_batch_size() function.
      */
-    function( sqlany_get_column_info_ex );	
-    /** Pointer to ::sqlany_get_bind_param_info_ex() function.
+    function( sqlany_set_batch_size );
+    /** Pointer to ::sqlany_set_param_bind_type() function.
      */
-    function( sqlany_get_bind_param_info_ex );
+    function( sqlany_set_param_bind_type );
+    /** Pointer to ::sqlany_get_batch_size() function.
+     */
+    function( sqlany_get_batch_size );
+    /** Pointer to ::sqlany_set_rowset_size() function.
+     */
+    function( sqlany_set_rowset_size );
+    /** Pointer to ::sqlany_get_rowset_size() function.
+     */
+    function( sqlany_get_rowset_size );
+    /** Pointer to ::sqlany_set_column_bind_type() function.
+     */
+    function( sqlany_set_column_bind_type );
+    /** Pointer to ::sqlany_bind_column() function.
+     */
+    function( sqlany_bind_column );
+    /** Pointer to ::sqlany_clear_column_bindings() function.
+     */
+    function( sqlany_clear_column_bindings );
+    /** Pointer to ::sqlany_fetched_rows() function.
+     */
+    function( sqlany_fetched_rows );
+    /** Pointer to ::sqlany_set_rowset_pos() function.
+     */
+    function( sqlany_set_rowset_pos );
 #endif
+
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
+    /** Pointer to ::sqlany_reset_param_data() function.
+     */
+    function( sqlany_reset_param_data );
+    /** Pointer to ::sqlany_error_length() function.
+     */
+    function( sqlany_error_length );
+#endif
+
 } SQLAnywhereInterface;
 #undef function
 
@@ -297,7 +343,7 @@ typedef struct SQLAnywhereInterface {
  * This function attempts to load the SQL Anywhere C API DLL dynamically and looks up all
  * the entry points of the DLL. The fields in the SQLAnywhereInterface structure are
  * populated to point to the corresponding functions in the DLL. If the optional path argument
- * is NULL, the environment variable SQLANY_DLL_PATH is checked. If the variable is set, 
+ * is NULL, the environment variable SQLANY_API_DLL is checked. If the variable is set,
  * the library attempts to load the DLL specified by the environment variable. If that fails,
  * the interface attempts to load the DLL directly (this relies on the environment being
  * setup correctly).

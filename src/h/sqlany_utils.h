@@ -46,7 +46,7 @@ extern uv_mutex_t api_mutex;
     vector.clear();				\
 }
 
-#define CLEAN_NUMS( vector )      		\
+#define CLEAN_PTRS( vector )      		\
 {                                          	\
     for( size_t i = 0; i < vector.size(); i++ ) { 	\
 	delete vector[i];			\
@@ -70,6 +70,60 @@ class scoped_lock
     private:
 	uv_mutex_t &_mtx;
 
+};
+
+class ExecuteData {
+  public:
+    ~ExecuteData() {
+	clear();
+    }
+
+    void clear( void ) {
+	CLEAN_STRINGS( string_vals );
+	CLEAN_STRINGS( string_arr_vals );
+	CLEAN_PTRS( int_vals );
+	CLEAN_PTRS( num_vals );
+	CLEAN_PTRS( len_vals );
+	CLEAN_PTRS( null_vals );
+    }
+    void	addString( char *str, size_t *len ) {
+	string_vals.push_back( str );
+	len_vals.push_back( len );
+    }
+    void	addStrings( char **str, size_t *len ) {
+	string_arr_vals.push_back( str );
+	len_vals.push_back( len );
+    }
+    void	addInt( int *val ) { int_vals.push_back( val ); }
+    void	addNum( double *val ) { num_vals.push_back( val ); }
+    void	addNull( sacapi_bool *val ) { null_vals.push_back( val ); }
+
+    char *	getString( size_t ind ) { return string_vals[ind]; }
+    char **	getStrings( size_t ind ) { return string_arr_vals[ind]; }
+    int		getInt( size_t ind ) { return *(int_vals[ind]); }
+    double	getNum( size_t ind ) { return *(num_vals[ind]); }
+    size_t	getLen( size_t ind ) { return *(len_vals[ind]); }
+    sacapi_bool	getNull( size_t ind ) { return *(null_vals[ind]); }
+
+    size_t	stringSize( void ) const { return string_vals.size(); }
+    size_t	intSize( void ) const { return int_vals.size(); }
+    size_t	numSize( void ) const { return num_vals.size(); }
+    size_t	lenSize( void ) const { return len_vals.size(); }
+    size_t	nullSize( void ) const { return null_vals.size(); }
+
+    bool	stringIsNull( size_t ind ) const { return string_vals[ind] == NULL; }
+    bool	intIsNull( size_t ind ) const { return int_vals[ind] == NULL; }
+    bool	numIsNull( size_t ind ) const { return num_vals[ind] == NULL; }
+    bool	lenIsNull( size_t ind ) const { return string_vals[ind] == NULL; }
+    bool	nullIsNull( size_t ind ) const { return string_vals[ind] == NULL; }
+
+  private:
+    std::vector<char *>		string_vals;
+    std::vector<char **>	string_arr_vals;
+    std::vector<int *> 		int_vals;
+    std::vector<double *>	num_vals;
+    std::vector<size_t *>	len_vals;
+    std::vector<sacapi_bool *>	null_vals;
 };
 
 bool cleanAPI (); // Finalizes the API and frees up resources
@@ -102,41 +156,30 @@ void callBack( std::string *		str,
 	       bool			callback_required = true );
 #endif
 
-bool getBindParameters( std::vector<char*>			&string_params
-		      , std::vector<double*>			&num_params
-		      , std::vector<int*>			&int_params
-		      , std::vector<size_t*>			&string_len
-		      , Handle<Value> 				arg
-		      , std::vector<a_sqlany_bind_param> 	&params
-		      );
+bool getBindParameters( std::vector<ExecuteData *>		&execData
+			, Handle<Value>				arg
+			, std::vector<a_sqlany_bind_param> 	&params
+			, unsigned				&num_rows
+    );
 
 #if v010
-bool getResultSet( Local<Value> 		&Result   
-		 , int 				&rows_affected
-		 , std::vector<char *> 		&colNames
-		 , std::vector<char*> 		&string_vals
-		 , std::vector<double*>		&num_vals
-		 , std::vector<int*> 		&int_vals
-		 , std::vector<size_t*> 	&string_len
+bool getResultSet( Local<Value> 			&Result   
+		 , int 					&rows_affected
+		 , std::vector<char *> 			&colNames
+		 , ExecuteData				*execData
 		 , std::vector<a_sqlany_data_type> 	&col_types );
 #else
-bool getResultSet( Persistent<Value> 		&Result   
-		 , int 				&rows_affected
-		 , std::vector<char *> 		&colNames
-		 , std::vector<char*> 		&string_vals
-		 , std::vector<double*>		&num_vals
-		 , std::vector<int*> 		&int_vals
-		 , std::vector<size_t*> 	&string_len
+bool getResultSet( Persistent<Value> 			&Result   
+		 , int 					&rows_affected
+		 , std::vector<char *> 			&colNames
+		 , ExecuteData				*execData
 		 , std::vector<a_sqlany_data_type> 	&col_types );
 #endif
 
 bool fetchResultSet( a_sqlany_stmt 			*sqlany_stmt
 		   , int 				&rows_affected
 		   , std::vector<char *> 		&colNames
-		   , std::vector<char*> 		&string_vals
-		   , std::vector<double*>		&num_vals
-		   , std::vector<int*> 			&int_vals
-		   , std::vector<size_t*> 		&string_len
+		   , ExecuteData			*execData
 		   , std::vector<a_sqlany_data_type> 	&col_types );
 
 struct noParamBaton {
@@ -166,4 +209,3 @@ void HashToString( Local<Object> obj, Persistent<String> &ret );
 Persistent<String> HashToString( Local<Object> obj );
 Handle<Value> CreateConnection( const Arguments &args );
 #endif
-

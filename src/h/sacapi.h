@@ -17,7 +17,7 @@
 //
 // While not a requirement of the license, if you do modify this file, we
 // would appreciate hearing about it. Please email
-// sqlany_interfaces@sybase.com
+// sqlany_interfaces@sap.com
 //
 // ***************************************************************************
 
@@ -99,11 +99,25 @@
  */
 #define SQLANY_API_VERSION_3		3
 
-/** Version 4 introduced NCHAR support.
+/** Version 4 introduced NCHAR support and wide inserts.
  *
  * You must define _SACAPI_VERSION as 4 or higher for this functionality.
  */
 #define SQLANY_API_VERSION_4		4
+
+/** Version 5 introduced a way to reset sent data through sqlany_send_param_data()
+ * and the A_FLOAT data type
+ *
+ * You must define _SACAPI_VERSION as 5 or higher for this functionality.
+ */
+#define SQLANY_API_VERSION_5		5
+
+/** If the command line does not specify which version to build, 
+ * then build the latest version. 
+ */
+#ifndef _SACAPI_VERSION
+#define _SACAPI_VERSION	SQLANY_API_VERSION_5
+#endif
 
 /** Returns the minimal error buffer size.
  */
@@ -179,13 +193,18 @@ typedef enum a_sqlany_data_type
     A_VAL8,
     /// 8-bit unsigned integer.
     A_UVAL8
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
+    ,
+    //// Float precision data.
+    A_FLOAT
+#endif
 } a_sqlany_data_type;
 
 /** Returns a description of the attributes of a data value.
  *
  * To view examples of the a_sqlany_data_value structure in use,
  * see any of the following sample files in the <dfn>sdk\\dbcapi\\examples</dfn> directory
- * of your SQL Anywhere installation.
+ * of your SQL Anywhere installation:
  *
  * <ul>
  * <li>dbcapi_isql.cpp
@@ -206,6 +225,10 @@ typedef struct a_sqlany_data_value
     a_sqlany_data_type	type;
     /// A pointer to indicate whether the last fetched data is NULL.
     sacapi_bool *	is_null;
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
+    /// Indicates whether the buffer value is an pointer to the actual value.
+    sacapi_bool		is_address;
+#endif
 } a_sqlany_data_value;
 
 /** A data direction enumeration.
@@ -226,7 +249,7 @@ typedef enum a_sqlany_data_direction
  *
  * To view examples of the a_sqlany_bind_param structure in use,
  * see any of the following sample files in the <dfn>sdk\\dbcapi\\examples</dfn> directory
- * of your SQL Anywhere installation.
+ * of your SQL Anywhere installation:
  *
  * <ul>
  * <li>preparing_statements.cpp
@@ -248,8 +271,6 @@ typedef struct a_sqlany_bind_param
 /** An enumeration of the native types of values as described by the server.
  *
  * The value types correspond to the embedded SQL data types.
- * For more information about embedded SQL data types, see
- * \salink{Embedded SQL data types, "http://dcx.sybase.com/goto?page=sa160/en/dbprogramming/esqlvar.html", "programming", "esqlvar"}.
  *
  * \hideinitializers
  * \sa sqlany_get_column_info(), a_sqlany_column_info
@@ -337,13 +358,17 @@ typedef struct a_sqlany_column_info
     size_t 			max_size;
     /// Indicates whether a value in the column can be null.
     sacapi_bool			nullable;
-#if _SACAPI_VERSION+0 >= 4
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
     /// The name of the table (null-terminated).
     /// The string can be referenced as long as the result set object is not freed.
     char *			table_name; 
     /// The name of the owner (null-terminated).
     /// The string can be referenced as long as the result set object is not freed.
     char *			owner_name; 
+    /// Indicates whether the column is bound to a user buffer.
+    sacapi_bool			is_bound;
+    /// Information about the bound column.
+    a_sqlany_data_value		binding;
 #endif
 } a_sqlany_column_info;
 
@@ -373,7 +398,7 @@ typedef struct a_sqlany_bind_param_info
     /// Information about the bound output value.
     a_sqlany_data_value		output_value;
     
-#if _SACAPI_VERSION+0 >= 4
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
     /// The native type of the column in the database.
     a_sqlany_native_type	native_type;
     /// The precision.
@@ -392,7 +417,7 @@ typedef struct a_sqlany_bind_param_info
  *
  * To view an example of the a_sqlany_data_info structure in use, 
  * see the following sample file in the <dfn>sdk\\dbcapi\\examples</dfn> directory
- * of your SQL Anywhere installation.
+ * of your SQL Anywhere installation:
  *
  * <ul>
  * <li>send_retrieve_part_blob.cpp
@@ -414,8 +439,6 @@ typedef struct a_sqlany_data_info
 /** An enumeration of the callback types.
  *
  * The callback types correspond to the embedded SQL callback types.
- * For more information about embedded SQL callbacks, see
- * \salink{db_register_a_callback function, "http://dcx.sybase.com/goto?page=sa160/en/dbprogramming/db-register-a-callback-esql.html", "programming", "db-register-a-callback-esql"}.
  *
  * \hideinitializers
  * \sa sqlany_register_callback()
@@ -450,9 +473,6 @@ typedef enum a_sqlany_callback_type {
 } a_sqlany_callback_type;
 
 /** An enumeration of the message types for the MESSAGE callback.
- *
- * For more information about CALLBACK_MESSAGE message types, see
- * \salink{db_register_a_callback function, "http://dcx.sybase.com/goto?page=sa160/en/dbprogramming/db-register-a-callback-esql.html", "programming", "db-register-a-callback-esql"}.
  *
  * \hideinitializers
  * \sa sqlany_register_callback()
@@ -492,7 +512,7 @@ typedef enum a_sqlany_message_type {
  */
 sacapi_bool sqlany_init( const char * app_name, sacapi_u32 api_version, sacapi_u32 * version_available );
 
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /** Initializes the interface using a context.
      *
      * \param app_name A string that names the API used, for example "PHP", "PERL", or "RUBY".
@@ -512,7 +532,7 @@ sacapi_bool sqlany_init( const char * app_name, sacapi_u32 api_version, sacapi_u
  * \sa sqlany_init()
  */
 void sqlany_fini();
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /** Finalize the interface that was created using the specified context.
      * Frees any resources allocated by the API.
      * \param context A context object that was returned from sqlany_init_ex()
@@ -532,7 +552,7 @@ void sqlany_fini();
  * \sa sqlany_connect(), sqlany_disconnect()
  */
 a_sqlany_connection * sqlany_new_connection( void );
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /** Creates a connection object using a context.
      * An API connection object needs to be created before a database connection is established. Errors can be retrieved 
      * from the connection object. Only one request can be processed on a connection at a time. In addition,
@@ -559,7 +579,7 @@ void sqlany_free_connection( a_sqlany_connection *sqlany_conn );
  * \sa sqlany_new_connection(), sqlany_execute(), sqlany_execute_direct(), sqlany_execute_immediate(), sqlany_prepare()
  */
 a_sqlany_connection * sqlany_make_connection( void * arg );
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /** Creates a connection object based on a supplied DBLIB SQLCA pointer and context.
      * \param context A valid context object that was created by sqlany_init_ex()
      * \param arg A void * pointer to a DBLIB SQLCA object. 
@@ -578,7 +598,7 @@ a_sqlany_connection * sqlany_make_connection( void * arg );
  * <pre>
  * a_sqlany_connection * sqlany_conn;
  * sqlany_conn = sqlany_new_connection();
- * if( !sqlany_connect( sqlany_conn, "uid=dba;pwd=sql" ) ) {
+ * if( !sqlany_connect( sqlany_conn, "uid=dba;pwd=passwd" ) ) {
  *     char reason[SACAPI_ERROR_SIZE];
  *     sacapi_i32 code;
  *     code = sqlany_error( sqlany_conn, reason, sizeof(reason) );
@@ -589,10 +609,6 @@ a_sqlany_connection * sqlany_make_connection( void * arg );
  * }
  * sqlany_free_connection( sqlany_conn );
  * </pre>
- *
- * For more information about connecting to a SQL Anywhere database server, see
- * \salink{Connection parameters, "http://dcx.sybase.com/goto?page=sa160/en/dbadmin/da-conparm.html", "dbadmin", "da-conparm"} and 
- * \salink{SQL Anywhere database connections, "http://dcx.sybase.com/goto?page=sa160/en/dbadmin/da-dbconnections.html", "dbadmin", "da-dbconnections"}.
  *
  * \param sqlany_conn A connection object created by sqlany_new_connection().
  * \param str A SQL Anywhere connection string.
@@ -612,7 +628,7 @@ sacapi_bool sqlany_connect( a_sqlany_connection * sqlany_conn, const char * str 
  */
 sacapi_bool sqlany_disconnect( a_sqlany_connection * sqlany_conn );
 
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /** Cancel an outstanding request on a connection.
      * This function can be used to cancel an outstanding request on a specific connection.
      * \param sqlany_conn A connection object with a connection established using sqlany_connect().
@@ -679,7 +695,7 @@ sacapi_i32 sqlany_num_params( a_sqlany_stmt * sqlany_stmt );
  *
  * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
  * \param index The index of the parameter. This number must be between 0 and sqlany_num_params() - 1.
- * \param param A a_sqlany_bind_param structure that is populated with information.
+ * \param param An a_sqlany_bind_param structure that is populated with information.
  * \return 1 when successful or 0 when unsuccessful.
  * \sa sqlany_bind_param(), sqlany_prepare()
  */
@@ -689,7 +705,7 @@ sacapi_bool sqlany_describe_bind_param( a_sqlany_stmt * sqlany_stmt, sacapi_u32 
  *
  * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
  * \param index The index of the parameter. This number must be between 0 and sqlany_num_params() - 1.
- * \param param A a_sqlany_bind_param structure description of the parameter to be bound.
+ * \param param An a_sqlany_bind_param structure description of the parameter to be bound.
  * \return 1 on success or 0 on unsuccessful.
  * \sa sqlany_describe_bind_param()
  */
@@ -698,6 +714,7 @@ sacapi_bool sqlany_bind_param( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_
 /** Sends data as part of a bound parameter.
  *
  * This method can be used to send a large amount of data for a bound parameter in chunks.
+ * This method can be used only when the batch size is 1.
  *
  * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
  * \param index The index of the parameter. This should be a number between 0 and sqlany_num_params() - 1.
@@ -707,6 +724,158 @@ sacapi_bool sqlany_bind_param( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_
  * \sa sqlany_prepare()
  */
 sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, char * buffer, size_t size );
+
+
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
+    /** Clears param data that was previously been set using \sa sqlany_send_param_data()
+     *
+     * This method can be used to clear data that was previously been sent using sqlany_send_param_data()
+     * If no param data was previously sent, nothing is changed.
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \param index The index of the parameter. This should be a number between 0 and sqlany_num_params() - 1.
+     * \return 1 on success or 0 on failure
+     * \sa sqlany_prepare(), sqlany_send_param_data()
+     */
+    sacapi_bool sqlany_reset_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index );
+
+    /** Retrieves the length of the last error message stored in the connection object
+     *  including the NULL terminator.  If there is no error, 0 is returned.
+     *
+     * \param sqlany_conn A connection object returned from sqlany_new_connection().
+     * \return The length of the last error message including the NULL terminator.
+     */
+    size_t sqlany_error_length( a_sqlany_connection * sqlany_conn );
+#endif
+
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
+    /** Sets the size of the row array for a batch execute. 
+     * 
+     * The batch size is used only for an INSERT statement. The default batch size is 1. 
+     * A value greater than 1 indicates a wide insert.
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \param num_rows The number of rows for batch execution. The value must be 1 or greater.
+     * \return 1 on success or 0 on failure.
+     * \sa sqlany_bind_param(), sqlany_get_batch_size()
+     */
+    sacapi_bool sqlany_set_batch_size( a_sqlany_stmt * sqlany_stmt, sacapi_u32 num_rows );
+
+    /** Sets the bind type of parameters. 
+     * 
+     * The default value is 0, which indicates column-wise binding. A non-zero value indicates 
+     * row-wise binding and specifies the byte size of the data structure that stores the row. 
+     * The parameter is bound to the first element in a contiguous array of values. The address 
+     * offset to the next element is computed based on the bind type:
+     *
+     * <ul>
+     * <li>Column-wise binding - the byte size of the parameter type</li>
+     * <li>Row-wise binding - the row_size</li>
+     * </ul>
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \param row_size The byte size of the row. A value of 0 indicates column-wise binding and a positive value indicates row-wise binding.
+     * \return 1 on success or 0 on failure.
+     * \sa sqlany_bind_param()
+     */
+    sacapi_bool sqlany_set_param_bind_type( a_sqlany_stmt * sqlany_stmt, size_t row_size );
+
+    /** Retrieves the size of the row array for a batch execute.
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \return The size of the row array.
+     * \sa sqlany_set_batch_size()
+     */
+    sacapi_u32 sqlany_get_batch_size( a_sqlany_stmt * sqlany_stmt );
+
+    /** Sets the size of the row set to be fetched by the sqlany_fetch_absolute() and sqlany_fetch_next() functions.
+     *
+     * The default size of the row set is 1. Specifying num_rows to be a value greater than 1 indicates a wide fetch. 
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \param num_rows The size of the row set. The value must be 1 or greater.
+     * \return 1 on success or 0 on failure.
+     * \sa sqlany_bind_column(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_get_rowset_size()
+     */
+    sacapi_bool sqlany_set_rowset_size( a_sqlany_stmt * sqlany_stmt, sacapi_u32 num_rows );
+
+    /** Retrieves the size of the row set to be fetched by the sqlany_fetch_absolute() and sqlany_fetch_next() functions.
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \return The size of the row set, or 0 if the statement does not return a result set.
+     * \sa sqlany_set_rowset_size(), sqlany_fetch_absolute(), sqlany_fetch_next()
+     */
+    sacapi_u32 sqlany_get_rowset_size( a_sqlany_stmt * sqlany_stmt );
+
+    /** Sets the bind type of columns. 
+     *
+     * The default value is 0, which indicates column-wise binding. A non-zero value indicates 
+     * row-wise binding and specifies the byte size of the data structure that stores the row.
+     * The column is bound to the first element in a contiguous array of values. The address 
+     * offset to the next element is computed based on the bind type:
+     *
+     * <ul>
+     * <li>Column-wise binding - the byte size of the column type</li>
+     * <li>Row-wise binding - the row_size</li>
+     * </ul>
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \param row_size The byte size of the row. A value of 0 indicates column-wise binding and a positive value indicates row-wise binding.
+     * \return 1 on success or 0 on failure.
+     * \sa sqlany_bind_column()
+     */
+    sacapi_bool sqlany_set_column_bind_type( a_sqlany_stmt * sqlany_stmt, sacapi_u32 row_size );
+
+    /** Binds a user-supplied buffer as a result set column to the prepared statement. 
+     *  
+     *  If the size of the fetched row set is greater than 1, the buffer must be large enough to 
+     *  hold the data of all of the rows in the row set. This function can also be used to clear the
+     *  binding of a column by specifying value to be NULL. 
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \param index The index of the column. This number must be between 0 and sqlany_num_cols() - 1.
+     * \param value An a_sqlany_data_value structure describing the bound buffers, or NULL to clear previous binding information.
+     * \return 1 on success or 0 on unsuccessful.
+     * \sa sqlany_clear_column_bindings(), sqlany_set_rowset_size()
+     */
+    sacapi_bool sqlany_bind_column( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_data_value * value );
+
+    /** Removes all column bindings defined using sqlany_bind_column().
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \return 1 on success or 0 on failure.
+     * \sa sqlany_bind_column()
+     */
+    sacapi_bool sqlany_clear_column_bindings( a_sqlany_stmt * sqlany_stmt );
+
+    /** Returns the number of rows fetched.
+     *
+     * In general, the number of rows fetched is equal to the size specified by the sqlany_set_rowset_size() function. The 
+     * exception is when there are fewer rows from the fetch position to the end of the result set than specified, in which
+     * case the number of rows fetched is smaller than the specified row set size. The function returns -1 if the last fetch
+     * was unsuccessful or if the statement has not been executed. The function returns 0 if the statement has been executed 
+     * but no fetching has been done. 
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \return The number of rows fetched or -1 on failure.
+     * \sa sqlany_bind_column(), sqlany_fetch_next(), sqlany_fetch_absolute()
+     */
+    sacapi_i32 sqlany_fetched_rows( a_sqlany_stmt * sqlany_stmt );
+
+    /** Sets the current row in the fetched row set.
+     *
+     * When a sqlany_fetch_absolute() or sqlany_fetch_next() function is executed, a row set 
+     * is created and the current row is set to be the first row in the row set. The functions 
+     * sqlany_get_column(), sqlany_get_data(), sqlany_get_data_info() are used to retrieve data 
+     * at the current row.
+     *
+     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
+     * \param row_num The row number within the row set. The valid values are from 0 to sqlany_fetched_rows() - 1.
+     * \return 1 on success or 0 on failure.
+     * \sa sqlany_set_rowset_size(), sqlany_get_column(), sqlany_get_data(), sqlany_get_data_info(), sqlany_fetch_absolute(), sqlany_fetch_next()
+     */
+    sacapi_bool sqlany_set_rowset_pos( a_sqlany_stmt * sqlany_stmt, sacapi_u32 row_num );
+#endif
 
 /** Resets a statement to its prepared state condition.
  *
@@ -725,19 +894,6 @@ sacapi_bool sqlany_reset( a_sqlany_stmt * sqlany_stmt );
  * \sa sqlany_bind_param(), sqlany_describe_bind_param(), sqlany_prepare()
  */
 sacapi_bool sqlany_get_bind_param_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param_info * info );
-
-#if _SACAPI_VERSION+0 >= 4
-    /** Retrieves information about the parameters that were bound using sqlany_bind_param().
-     *
-     * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
-     * \param index The index of the parameter. This number should be between 0 and sqlany_num_params() - 1.
-     * \param info A sqlany_bind_param_info buffer to be populated with the bound parameter's information.
-     * \param size The size of the sqlany_bind_param_info structure. As of version 4, new fields have been added to the structure.
-     * \return 1 on success or 0 on failure.
-     * \sa sqlany_bind_param(), sqlany_describe_bind_param(), sqlany_prepare()
-     */
-    sacapi_bool sqlany_get_bind_param_info_ex( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param_info * info, size_t size );
-#endif
 
 /** Executes a prepared statement.
  *
@@ -808,28 +964,32 @@ sacapi_bool sqlany_execute( a_sqlany_stmt * sqlany_stmt );
  */
 a_sqlany_stmt * sqlany_execute_direct( a_sqlany_connection * sqlany_conn, const char * sql_str );
 
-/** Moves the current row in the result set to the row number specified and then fetches the data at that row.
+/** Moves the current row in the result set to the specified row number and then fetches 
+ *  rows of data starting from the current row. 
+ *
+ *  The number of rows fetched is set using the sqlany_set_rowset_size() function. By default, one row is returned.
  *
  * \param sqlany_stmt A statement object that was executed by
  *     sqlany_execute() or sqlany_execute_direct().
  * \param row_num The row number to be fetched. The first row is 1, the last row is -1.
  * \return 1 if the fetch was successfully, 0 when the fetch is unsuccessful.
- * \sa sqlany_execute_direct(), sqlany_execute(), sqlany_error(), sqlany_fetch_next()
+ * \sa sqlany_execute_direct(), sqlany_execute(), sqlany_error(), sqlany_fetch_next(), sqlany_set_rowset_size()
  */
 sacapi_bool sqlany_fetch_absolute( a_sqlany_stmt * sqlany_stmt, sacapi_i32 row_num );
 
-/** Returns the next row from the result set.
+/** Returns the next set of rows from the result set.
  *
- * This function fetches the next row from the result set.
  * When the result object is first created, the current row 
  * pointer is set to before the first row, that is, row 0.
- * This function first advances the row pointer and then fetches
- * the data at the new row.
+ * This function first advances the row pointer to the next 
+ * unfetched row and then fetches rows of data starting from 
+ * that row. The number of rows fetched is set by the 
+ * sqlany_set_rowset_size() function. By default, one row is returned.
  *
  * \param sqlany_stmt A statement object that was executed by
  *     sqlany_execute() or sqlany_execute_direct().
  * \return 1 if the fetch was successfully, 0 when the fetch is unsuccessful.
- * \sa sqlany_fetch_absolute(), sqlany_execute_direct(), sqlany_execute(), sqlany_error()
+ * \sa sqlany_fetch_absolute(), sqlany_execute_direct(), sqlany_execute(), sqlany_error(), sqlany_set_rowset_size()
  */
 sacapi_bool sqlany_fetch_next( a_sqlany_stmt * sqlany_stmt );
 
@@ -879,8 +1039,7 @@ sacapi_i32 sqlany_num_cols( a_sqlany_stmt * sqlany_stmt );
 /** Returns the number of rows in the result set.
  *
  * By default this function only returns an estimate. To return an exact count, set the row_counts option
- * on the connection. For more information about the row_counts option, see 
- * \salink{row_counts option [database], "http://dcx.sybase.com/goto?page=sa160/en/dbadmin/row-counts-option.html", "dbadmin", "row-counts-option"}.
+ * on the connection. 
  *
  * \param sqlany_stmt A statement object that was executed by
  *     sqlany_execute() or sqlany_execute_direct().
@@ -891,8 +1050,12 @@ sacapi_i32 sqlany_num_cols( a_sqlany_stmt * sqlany_stmt );
  */
 sacapi_i32 sqlany_num_rows( a_sqlany_stmt * sqlany_stmt );
 
-/** Fills the supplied buffer with the value fetched for the specified column.
+/** Fills the supplied buffer with the value fetched for the specified column at the current row.
  * 
+ * When a sqlany_fetch_absolute() or sqlany_fetch_next() function is executed, a row set 
+ * is created and the current row is set to be the first row in the row set. The current 
+ * row is set using the sqlany_set_rowset_pos() function.
+ *
  * For A_BINARY and A_STRING * data types,
  * value->buffer points to an internal buffer associated with the result set.
  * Do not rely upon or alter the content of the pointer buffer as it changes when a
@@ -909,40 +1072,48 @@ sacapi_i32 sqlany_num_rows( a_sqlany_stmt * sqlany_stmt );
  * \param sqlany_stmt A statement object executed by
  *     sqlany_execute() or sqlany_execute_direct().
  * \param col_index The number of the column to be retrieved.
- *	A column number is between 0 and sqlany_num_cols() - 1.
- * \param buffer A a_sqlany_data_value object to be filled with the data fetched for column col_index.
+ *	The column number is between 0 and sqlany_num_cols() - 1.
+ * \param buffer An a_sqlany_data_value object to be filled with the data fetched for column col_index at the current row in the row set.
  * \return 1 on success or 0 for failure. A failure can happen if any of the parameters are invalid or if there is 
  * not enough memory to retrieve the full value from the SQL Anywhere database server.
- * \sa sqlany_execute_direct(), sqlany_execute(), sqlany_fetch_absolute(), sqlany_fetch_next()
+ * \sa sqlany_execute_direct(), sqlany_execute(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_set_rowset_pos()
  */
 sacapi_bool sqlany_get_column( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_data_value * buffer );
 
-/** Retrieves the data fetched for the specified column into the supplied buffer memory.
+/** Retrieves the data fetched for the specified column at the current row into the supplied buffer memory.
+ *
+ * When a sqlany_fetch_absolute() or sqlany_fetch_next() function is executed, a row set 
+ * is created and the current row is set to be the first row in the row set. The current 
+ * row is set using the sqlany_set_rowset_pos() function.
  *
  * \param sqlany_stmt A statement object executed by
  *     sqlany_execute() or sqlany_execute_direct().
  * \param col_index The number of the column to be retrieved.
- *	A column number is between 0 and sqlany_num_cols() - 1.
+ *	The column number is between 0 and sqlany_num_cols() - 1.
  * \param offset The starting offset of the data to get.
- * \param buffer A buffer to be filled with the contents of the column. The buffer pointer must be aligned correctly
+ * \param buffer A buffer to be filled with the contents of the column at the current row in the row set. The buffer pointer must be aligned correctly
  * for the data type copied into it.
  * \param size The size of the buffer in bytes. The function fails
  * if you specify a size greater than 2^31 - 1.
  * \return The number of bytes successfully copied into the supplied buffer.
  * This number must not exceed 2^31 - 1. 
  * 0 indicates that no data remains to be copied.  -1 indicates a failure.
- * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_fetch_absolute(), sqlany_fetch_next()
+ * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_set_rowset_pos()
  */
 sacapi_i32 sqlany_get_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, size_t offset, void * buffer, size_t size );
 
-/** Retrieves information about the data that was fetched by the last fetch operation.
+/** Retrieves information about the fetched data at the current row.
+ *
+ * When a sqlany_fetch_absolute() or sqlany_fetch_next() function is executed, a row set 
+ * is created and the current row is set to be the first row in the row set. The current 
+ * row is set using the sqlany_set_rowset_pos() function.
  *
  * \param sqlany_stmt A statement object executed by
  *     sqlany_execute() or sqlany_execute_direct().
  * \param col_index The column number between 0 and sqlany_num_cols() - 1.
- * \param buffer A data info buffer to be filled with the metadata about the data fetched.
+ * \param buffer A data info buffer to be filled with the metadata about the data at the current row in the row set.
  * \return 1 on success, and 0 on failure. Failure is returned when any of the supplied parameters are invalid.
- * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_fetch_absolute(), sqlany_fetch_next()
+ * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_set_rowset_pos()
  */
 sacapi_bool sqlany_get_data_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_data_info * buffer );
 
@@ -956,20 +1127,6 @@ sacapi_bool sqlany_get_data_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_in
  * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_prepare()
  */
 sacapi_bool sqlany_get_column_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_column_info * buffer );
-
-#if _SACAPI_VERSION+0 >= 4
-    /** Retrieves column metadata information and fills the a_sqlany_column_info structure with information about the column.
-     *
-     * \param sqlany_stmt A statement object created by sqlany_prepare() or sqlany_execute_direct().
-     * \param col_index The column number between 0 and sqlany_num_cols() - 1.
-     * \param buffer A column info structure to be filled with column information.
-     * \param size The size of the sqlany_column_info structure. As of version 4, new fields have been added to the structure.
-     * \return 1 on success or 0 if the column index is out of range,
-     * or if the statement does not return a result set.
-     * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_prepare()
-     */
-    sacapi_bool sqlany_get_column_info_ex( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_column_info * buffer, size_t size );
-#endif
 
 /** Commits the current transaction.
  *
@@ -997,13 +1154,13 @@ sacapi_bool sqlany_rollback( a_sqlany_connection * sqlany_conn );
  * \return 1 when successful or 0 when unsuccessful.
  */
 sacapi_bool sqlany_client_version( char * buffer, size_t len );
-#if _SACAPI_VERSION+0 >= 2
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
     /** Returns the current client version.
      *
      * This method fills the buffer passed with the major, minor, patch, and build number of the client library. 
      * The buffer will be null-terminated.
      *
-     * \param context object that was create with sqlany_init_ex()
+     * \param context The object that was created with sqlany_init_ex().
      * \param buffer The buffer to be filled with the client version string.
      * \param len The length of the buffer supplied.
      * \return 1 when successful or 0 when unsuccessful.
@@ -1014,9 +1171,6 @@ sacapi_bool sqlany_client_version( char * buffer, size_t len );
 
 /** Retrieves the last error code and message stored in the connection object.
  *
- * For more information about SQLCODE error messages, see 
- * \salink{SQL Anywhere error messages sorted by SQLCODE, "http://dcx.sybase.com/goto?page=sa160/en/saerrors/sa-errors-by-sqlcode.html", "errors", "sa-errors-by-sqlcode"}.
- *
  * \param sqlany_conn A connection object returned from sqlany_new_connection().
  * \param buffer A buffer to be filled with the error message.
  * \param size The size of the supplied buffer.
@@ -1026,9 +1180,6 @@ sacapi_bool sqlany_client_version( char * buffer, size_t len );
 sacapi_i32 sqlany_error( a_sqlany_connection * sqlany_conn, char * buffer, size_t size );
 
 /** Retrieves the current SQLSTATE.
- *
- * For more information about SQLSTATE error messages, see 
- * \salink{SQL Anywhere error messages sorted by SQLSTATE, "http://dcx.sybase.com/goto?page=sa160/en/saerrors/sa-errors-by-sqlstate.html", "errors", "sa-errors-by-sqlstate"}.
  *
  * \param sqlany_conn A connection object returned from sqlany_new_connection().
  * \param buffer A buffer to be filled with the current 5-character SQLSTATE.
@@ -1045,7 +1196,7 @@ size_t sqlany_sqlstate( a_sqlany_connection * sqlany_conn, char * buffer, size_t
  */
 void sqlany_clear_error( a_sqlany_connection * sqlany_conn );
 
-#if _SACAPI_VERSION+0 >= 3
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_3
     /** Register a callback routine.
      *
      * This function can be used to register callback functions.
@@ -1095,35 +1246,35 @@ void sqlany_clear_error( a_sqlany_connection * sqlany_conn );
 }
 #endif
 
-/** \example connecting.cpp
+/** \example examples\connecting.cpp
  * This is an example of how to create a connection object and connect with it to SQL Anywhere.
  */
 
-/** \example fetching_a_result_set.cpp
+/** \example examples\fetching_a_result_set.cpp
  * This example shows how to fetch data from a result set.
  */
 
-/** \example preparing_statements.cpp
+/** \example examples\preparing_statements.cpp
  * This example shows how to prepare and execute a statement.
  */
 
-/** \example fetching_multiple_from_sp.cpp
+/** \example examples\fetching_multiple_from_sp.cpp
  * This example shows how to fetch multiple result sets from a stored procedure.
  */
 
-/** \example send_retrieve_part_blob.cpp
+/** \example examples\send_retrieve_part_blob.cpp
  * This example shows how to insert a blob in chunks and retrieve it in chunks too.
  */
 
-/** \example send_retrieve_full_blob.cpp
+/** \example examples\send_retrieve_full_blob.cpp
  * This example shows how to insert and retrieve a blob in one chunk .
  */
 
-/** \example dbcapi_isql.cpp
+/** \example examples\dbcapi_isql.cpp
  * This example shows how to write an ISQL application using dbcapi.
  */
 
-/** \example callback.cpp
+/** \example examples\callback.cpp
  * This is an example of how to register and use a callback function.
  */
 
