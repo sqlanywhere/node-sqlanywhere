@@ -195,6 +195,13 @@ static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
     unsigned		num_cols = row0->Length();
     unsigned		c;
 
+    if( num_cols == 0 ) {
+	// if an empty array was passed in, we still need ExecuteData
+	ExecuteData *ex = new ExecuteData;
+	execData.push_back( ex );
+	return true;
+    }
+
     // Make sure that each array in the list has the same number and types
     // of values
     for( unsigned int r = 1; r < num_rows; r++ ) {
@@ -298,6 +305,9 @@ bool getBindParameters( std::vector<ExecuteData *>		&execData,
     Handle<Array>		bind_params = Handle<Array>::Cast( arg );
 
     if( bind_params->Length() == 0 ) {
+	// if an empty array was passed in, we still need ExecuteData
+	ExecuteData *ex = new ExecuteData;
+	execData.push_back( ex );
 	return true;
     }
 
