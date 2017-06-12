@@ -13,7 +13,14 @@ native compilation. Native compilation is managed by [`node-gyp`](https://github
 
 The official version hosted on NPM includes precompiled libraries for Windows (64-bit).
 
-As of version 1.0.6, the node-sqlanywhere driver supports node.js v0.10, 0.12, 4.x, and 5.x. As of version 1.0.9, it also supports node.js v6.x and v7.x.
+Versions supported:
+
+<table border="1">
+<tr><th>Driver version</th><th>Node.js version</th></tr>
+<tr><td>1.0.6</td><td>0.10, 0.12, 4.x, 5.x</td></tr>
+<tr><td>1.0.9</td><td>6.x, 7.x</td></tr>
+<tr><td>1.0.19</td><td>8.x</td></tr>
+</table>
 
 ## Getting Started
 
