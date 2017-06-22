@@ -126,7 +126,11 @@ void executeWork( uv_work_t *req )
 	    return;
 	}
 	
-	param.value.type = baton->params[i].value.type;
+	if( param.value.type == A_INVALID_TYPE &&
+	    ( baton->params[i].value.is_null == NULL ||
+	      !(*(baton->params[i].value.is_null)) ) ) {
+	    param.value.type = baton->params[i].value.type;
+	}
 	param.value.buffer = baton->params[i].value.buffer;
 	param.value.is_address = baton->params[i].value.is_address;
 	

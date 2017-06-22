@@ -1,8 +1,8 @@
 {
-  "author": "SQL ANYWHERE ",
+  "author": "SQL ANYWHERE",
   "name": "sqlanywhere",
   "description": "SQL Anywhere JavaScript Driver.",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "repository": {
     "url": "https://github.com/sqlanywhere/node-sqlanywhere"
   },
