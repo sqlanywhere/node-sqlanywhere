@@ -371,7 +371,7 @@ bool getBindParameters( std::vector<ExecuteData *>		&execData,
 	    param.value.buffer_size = sizeof( param_char );
 	    
 	} else if( bind_params->Get(i)->IsNull() ) {
-	    param.value.type = A_VAL32;
+	    param.value.type = A_STRING;
 	    sacapi_bool *is_null = new sacapi_bool;
 	    param.value.is_null = is_null;
 	    ex->addNull( is_null );

@@ -126,22 +126,7 @@ void executeWork( uv_work_t *req )
 	    return;
 	}
 	
-	if( param.value.type == A_INVALID_TYPE &&
-	    ( baton->params[i].value.is_null == NULL ||
-	      !(*(baton->params[i].value.is_null)) ) ) {
-	    param.value.type = baton->params[i].value.type;
-	}
-	param.value.buffer = baton->params[i].value.buffer;
-	param.value.is_address = baton->params[i].value.is_address;
-	
-	if( param.value.type == A_STRING || param.value.type == A_BINARY ) {
-	    param.value.length = baton->params[i].value.length;
-	    param.value.buffer_size = baton->params[i].value.buffer_size;
-	}
-	
-	if( baton->params[i].value.is_null != NULL ) {
-	    param.value.is_null = baton->params[i].value.is_null;
-	}
+        memcpy( &param.value, &baton->params[i].value, sizeof( param.value ) );
 	
 	if( !api.sqlany_bind_param( sqlany_stmt, i, &param ) ) {
 	    baton->err = true;
