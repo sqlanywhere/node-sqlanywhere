@@ -20,6 +20,7 @@ Versions supported:
 <tr><td>1.0.6</td><td>0.10, 0.12, 4.x, 5.x</td></tr>
 <tr><td>1.0.9</td><td>6.x, 7.x</td></tr>
 <tr><td>1.0.19</td><td>8.x</td></tr>
+<tr><td>1.0.22</td><td>9.x</td></tr>
 </table>
 
 ## Getting Started

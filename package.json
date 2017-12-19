@@ -2,7 +2,7 @@
   "author": "SQL ANYWHERE",
   "name": "sqlanywhere",
   "description": "SQL Anywhere JavaScript Driver.",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "repository": {
     "url": "https://github.com/sqlanywhere/node-sqlanywhere"
   },
