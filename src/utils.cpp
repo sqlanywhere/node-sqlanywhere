@@ -1,5 +1,5 @@
 // ***************************************************************************
-// Copyright (c) 2017 SAP SE or an SAP affiliate company. All rights reserved.
+// Copyright (c) 2018 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
 #include "nodever_cover.h"
 #include "sqlany_utils.h"
@@ -114,7 +114,11 @@ void callBack( std::string *		str,
 	int argc = 2;
 	Local<Value> argv[2] = { Err, Result };
 	
+#if v012
 	TryCatch try_catch;
+#else
+        TryCatch try_catch( isolate );
+#endif
 	local_callback->Call( isolate->GetCurrentContext()->Global(), argc, argv );
 	if( try_catch.HasCaught()) {
 	    node::FatalException( isolate, try_catch );
@@ -168,7 +172,11 @@ void callBack( std::string *		str,
 	int argc = 2;
 	Local<Value> argv[2] = { Err,  Result };
 	
+#if v012
 	TryCatch try_catch;
+#else
+        TryCatch try_catch( isolate );
+#endif
 	callback->Call( isolate->GetCurrentContext()->Global(), argc, argv );
 	if( try_catch.HasCaught()) {
 	    node::FatalException( isolate, try_catch );
@@ -782,7 +790,15 @@ void StmtObject::CreateNewInstance( const FunctionCallbackInfo<Value> &	args,
     const unsigned argc = 1;
     Handle<Value> argv[argc] = { args[0] };
     Local<Function>cons = Local<Function>::New( isolate, constructor );
+#if NODE_MAJOR_VERSION >= 10
+    Local<Context> env = isolate->GetCurrentContext();
+    MaybeLocal<Object> mlObj = cons->NewInstance( env, argc, argv );
+    Local<Object> instance = mlObj.ToLocalChecked();
+
+    obj.Reset( isolate, instance );
+#else
     obj.Reset( isolate, cons->NewInstance( argc, argv ) );
+#endif
 }
 
 void StmtObject::cleanup( void )
@@ -990,7 +1006,14 @@ void Connection::New( const FunctionCallbackInfo<Value> &args )
 	const int argc = 1;
 	Local<Value> argv[argc] = { args[0] };
 	Local<Function> cons = Local<Function>::New( isolate, constructor );
+#if NODE_MAJOR_VERSION >= 10
+        Local<Context> env = isolate->GetCurrentContext();
+        MaybeLocal<Object> mlObj = cons->NewInstance( env, argc, argv );
+        const Local<Object> obj = mlObj.ToLocalChecked();
+	args.GetReturnValue().Set( obj );
+#else
 	args.GetReturnValue().Set( cons->NewInstance( argc, argv ) );
+#endif
     }
 }
 
@@ -1002,7 +1025,13 @@ void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
     const unsigned argc = 1;
     Handle<Value> argv[argc] = { args[0] };
     Local<Function> cons = Local<Function>::New( isolate, constructor );
+#if NODE_MAJOR_VERSION >= 10
+    Local<Context> env = isolate->GetCurrentContext();
+    MaybeLocal<Object> mlObj = cons->NewInstance( env, argc, argv );
+    Local<Object> instance = mlObj.ToLocalChecked();
+#else
     Local<Object> instance = cons->NewInstance( argc, argv );
+#endif
     args.GetReturnValue().Set( instance );
 }
 
