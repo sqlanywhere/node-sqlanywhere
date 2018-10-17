@@ -22,6 +22,7 @@ Versions supported:
 <tr><td>1.0.19</td><td>8.x</td></tr>
 <tr><td>1.0.22</td><td>9.x</td></tr>
 <tr><td>1.0.23</td><td>10.x</td></tr>
+<tr><td>1.0.24</th><td><b>Only</b> 5.x through 10.x (support for 0.10, 0.12, and 4.x is dropped)</td></tr>
 </table>
 
 ## Getting Started
