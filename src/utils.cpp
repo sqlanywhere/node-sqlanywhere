@@ -82,6 +82,7 @@ void throwError( int code )
 {
     Isolate *isolate = Isolate::GetCurrent();
     std::string message;
+	
     getErrorMsg( code, message );
     isolate->ThrowException( 
 	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ) ) );
@@ -194,126 +195,131 @@ void callBack( std::string *		str,
 }
 
 static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
-				   Handle<Value>			arg,
+	Local<Value>			arg,
 				   std::vector<a_sqlany_bind_param> &	params,
 				   unsigned				&num_rows )
 /*********************************************************************************/
 {
-    Handle<Array>	rows = Handle<Array>::Cast( arg );
-    num_rows = rows->Length();
+	//Isolate* isolate = Isolate::GetCurrent();
+	//Local<Context> context = isolate->GetCurrentContext();
+	//Local<Array>	rows = Local<Array>::Cast( arg );
+ //   num_rows = rows->Length();
 
-    Handle<Array>	row0 = Handle<Array>::Cast( rows->Get(0) );
-    unsigned		num_cols = row0->Length();
-    unsigned		c;
+	//Local<Array>	row0 = Local<Array>::Cast( rows->Get(0) );
+ //   unsigned		num_cols = row0->Length();
+ //   unsigned		c;
 
-    if( num_cols == 0 ) {
-	// if an empty array was passed in, we still need ExecuteData
-	ExecuteData *ex = new ExecuteData;
-	execData.push_back( ex );
-	return true;
-    }
+ //   if( num_cols == 0 ) {
+	//// if an empty array was passed in, we still need ExecuteData
+	//ExecuteData *ex = new ExecuteData;
+	//execData.push_back( ex );
+	//return true;
+ //   }
 
-    // Make sure that each array in the list has the same number and types
-    // of values
-    for( unsigned int r = 1; r < num_rows; r++ ) {
-	Handle<Array>	row = Handle<Array>::Cast( rows->Get(r) );
-	for( c = 0; c < num_cols; c++ ) {
-	    Handle<Value> val0 = row0->Get(c);
-	    Handle<Value> val = row->Get(c);
+ //   // Make sure that each array in the list has the same number and types
+ //   // of values
+ //   for( unsigned int r = 1; r < num_rows; r++ ) {
+	//Local<Array>	row = Local<Array>::Cast( rows->Get(r) );
+	//for( c = 0; c < num_cols; c++ ) {
+	//	Local<Value> val0 = row0->Get(c);
+	//	Local<Value> val = row->Get(c);
 
-	    if( ( val0->IsInt32() || val0->IsNumber() ) &&
-		( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
-		return false;
-	    }
-	    if( val0->IsString() &&
-		!val->IsString() && !val->IsNull() ) {
-		return false;
-	    }
-	    if( Buffer::HasInstance( val0 ) &&
-		!Buffer::HasInstance( val ) && !val->IsNull() ) {
-		return false;
-	    }
-	}
-    }
+	//    if( ( val0->IsInt32() || val0->IsNumber() ) &&
+	//	( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
+	//	return false;
+	//    }
+	//    if( val0->IsString() &&
+	//	!val->IsString() && !val->IsNull() ) {
+	//	return false;
+	//    }
+	//    if( Buffer::HasInstance( val0 ) &&
+	//	!Buffer::HasInstance( val ) && !val->IsNull() ) {
+	//	return false;
+	//    }
+	//}
+ //   }
 
-    for( c = 0; c < num_cols; c++ ) {
-	a_sqlany_bind_param 	param;
-	memset( &param, 0, sizeof( param ) );
+ //   for( c = 0; c < num_cols; c++ ) {
+	//a_sqlany_bind_param 	param;
+	//memset( &param, 0, sizeof( param ) );
 
-	ExecuteData *ex = new ExecuteData;
-	execData.push_back( ex );
+	//ExecuteData *ex = new ExecuteData;
+	//execData.push_back( ex );
 
-	double *	param_double = new double[num_rows];
-	ex->addNum( param_double );
-	char **		char_arr = new char *[num_rows];
-	size_t *	len = new size_t[num_rows];
-	ex->addStrings( char_arr, len );
-	sacapi_bool *	is_null = new sacapi_bool[num_rows];
-	ex->addNull( is_null );
-	param.value.is_null	= is_null;
-	param.value.is_address	= false;
+	//double *	param_double = new double[num_rows];
+	//ex->addNum( param_double );
+	//char **		char_arr = new char *[num_rows];
+	//size_t *	len = new size_t[num_rows];
+	//ex->addStrings( char_arr, len );
+	//sacapi_bool *	is_null = new sacapi_bool[num_rows];
+	//ex->addNull( is_null );
+	//param.value.is_null	= is_null;
+	//param.value.is_address	= false;
 
-	if( row0->Get(c)->IsInt32() || row0->Get(c)->IsNumber() ) {
-	    param.value.type	= A_DOUBLE;
-	    param.value.buffer	= (char *)( param_double );
+	//if( row0->Get(c)->IsInt32() || row0->Get(c)->IsNumber() ) {
+	//    param.value.type	= A_DOUBLE;
+	//    param.value.buffer	= (char *)( param_double );
 
-	} else if( row0->Get(c)->IsString() ) {
-	    param.value.type	= A_STRING;
-	    param.value.buffer	= (char *)char_arr;
-	    param.value.length	= len;
-	    param.value.is_address = true;
+	//} else if( row0->Get(c)->IsString() ) {
+	//    param.value.type	= A_STRING;
+	//    param.value.buffer	= (char *)char_arr;
+	//    param.value.length	= len;
+	//    param.value.is_address = true;
 
-	} else if( Buffer::HasInstance( row0->Get(c) ) ) {
-	    param.value.type	= A_BINARY;
-	    param.value.buffer	= (char *)char_arr;
-	    param.value.length	= len;
-	    param.value.is_address = true;
-	    
-	} else if( row0->Get(c)->IsNull() ) {
+	//} else if( Buffer::HasInstance( row0->Get(c) ) ) {
+	//    param.value.type	= A_BINARY;
+	//    param.value.buffer	= (char *)char_arr;
+	//    param.value.length	= len;
+	//    param.value.is_address = true;
+	//    
+	//} else if( row0->Get(c)->IsNull() ) {
 
-	} else{
-	    return false;
-	}
+	//} else{
+	//    return false;
+	//}
 
-	for( unsigned int r = 0; r < num_rows; r++ ) {
-	    Handle<Array>	bind_params = Handle<Array>::Cast( rows->Get(r) );
-	
-	    is_null[r] = false;
-	    if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
-		param_double[r] = bind_params->Get(c)->NumberValue();
-	
-	    } else if( bind_params->Get(c)->IsString() ) {
-		String::Utf8Value paramValue( bind_params->Get(c)->ToString() );
-		const char* param_string = (*paramValue);
-		len[r] = (size_t)paramValue.length();
-		char *param_char = new char[len[r] + 1];
-		char_arr[r] = param_char;
-		memcpy( param_char, param_string, len[r] + 1 );
-		
-	    } else if( Buffer::HasInstance( bind_params->Get(c) ) ) {
-		len[r] = Buffer::Length( bind_params->Get(c) );
-		char *param_char = new char[len[r]];
-		char_arr[r] = param_char;
-		memcpy( param_char, Buffer::Data( bind_params->Get(c) ), len[r] );
+	//for( unsigned int r = 0; r < num_rows; r++ ) {
+	//	Local<Array>	bind_params = Local<Array>::Cast( rows->Get(r) );
+	//
+	//    is_null[r] = false;
+	//    if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
+	//	param_double[r] = bind_params->Get(c)->NumberValue(context).ToChecked();
+	//
+	//    } else if( bind_params->Get(c)->IsString() ) {
+	//	Nan::Utf8String paramValue( bind_params->Get(c)->ToString(isolate) );
+	//	const char* param_string = (*paramValue);
+	//	len[r] = (size_t)paramValue.length();
+	//	char *param_char = new char[len[r] + 1];
+	//	char_arr[r] = param_char;
+	//	memcpy( param_char, param_string, len[r] + 1 );
+	//	
+	//    } else if( Buffer::HasInstance( bind_params->Get(c) ) ) {
+	//	len[r] = Buffer::Length( bind_params->Get(c) );
+	//	char *param_char = new char[len[r]];
+	//	char_arr[r] = param_char;
+	//	memcpy( param_char, Buffer::Data( bind_params->Get(c) ), len[r] );
 
-	    } else if( bind_params->Get(c)->IsNull() ) {
-		is_null[r] = true;
-	    }
-	}
-    
-	params.push_back( param );
-    }
+	//    } else if( bind_params->Get(c)->IsNull() ) {
+	//	is_null[r] = true;
+	//    }
+	//}
+ //   
+	//params.push_back( param );
+ //   }
 
     return true;	   
 }
 
 bool getBindParameters( std::vector<ExecuteData *>		&execData,
-			Handle<Value> 				arg,
+	Local<Value> 				arg,
 			std::vector<a_sqlany_bind_param> &	params,
 			unsigned				&num_rows )
 /*************************************************************************/
 {
-    Handle<Array>		bind_params = Handle<Array>::Cast( arg );
+
+	Isolate* isolate = Isolate::GetCurrent();
+	Local<Context> context = isolate->GetCurrentContext();
+	Local<Array>		bind_params = Local<Array>::Cast( arg );
 
     if( bind_params->Length() == 0 ) {
 	// if an empty array was passed in, we still need ExecuteData
@@ -336,20 +342,20 @@ bool getBindParameters( std::vector<ExecuteData *>		&execData,
 
 	if( bind_params->Get(i)->IsInt32() ) {
 	    int *param_int = new int;
-	    *param_int = bind_params->Get(i)->Int32Value();
+	    *param_int = bind_params->Get(i)->Int32Value(context).ToChecked();
 	    ex->addInt( param_int );
 	    param.value.buffer = (char *)( param_int );
 	    param.value.type   = A_VAL32;
 	    
 	} else if( bind_params->Get(i)->IsNumber() ) {
 	    double *param_double = new double;
-	    *param_double = bind_params->Get(i)->NumberValue(); // Remove Round off Error
+	    *param_double = bind_params->Get(i)->NumberValue(context).ToChecked(); // Remove Round off Error
 	    ex->addNum( param_double );
 	    param.value.buffer = (char *)( param_double );
 	    param.value.type   = A_DOUBLE;
 	
 	} else if( bind_params->Get(i)->IsString() ) {
-	    String::Utf8Value paramValue( bind_params->Get(i)->ToString() );
+		Nan::Utf8String paramValue( bind_params->Get(i)->ToString(context).ToLocalChecked() );
 	    const char* param_string = (*paramValue);
 	    size_t *len = new size_t;
 	    *len = (size_t)paramValue.length();
@@ -755,6 +761,7 @@ void StmtObject::Init( Isolate *isolate )
 /***************************************/
 {
     HandleScope	scope(isolate);
+	Local<Context> context = isolate->GetCurrentContext();
     // Prepare constructor template
     Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
     tpl->SetClassName( String::NewFromUtf8( isolate, "StmtObject" ) );
@@ -764,7 +771,7 @@ void StmtObject::Init( Isolate *isolate )
     NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
     NODE_SET_PROTOTYPE_METHOD( tpl, "drop", drop );
     NODE_SET_PROTOTYPE_METHOD( tpl, "getMoreResults", getMoreResults );
-    constructor.Reset( isolate, tpl->GetFunction() );
+    constructor.Reset( isolate, tpl->GetFunction(context).ToLocalChecked() );
 }
 
 void StmtObject::New( const FunctionCallbackInfo<Value> &args )
@@ -791,7 +798,7 @@ void StmtObject::CreateNewInstance( const FunctionCallbackInfo<Value> &	args,
     Isolate *isolate = args.GetIsolate();
     HandleScope	scope(isolate);
     const unsigned argc = 1;
-    Handle<Value> argv[argc] = { args[0] };
+	Local<Value> argv[argc] = { args[0] };
     Local<Function>cons = Local<Function>::New( isolate, constructor );
 #if NODE_MAJOR_VERSION >= 10
     Local<Context> env = isolate->GetCurrentContext();
@@ -829,15 +836,16 @@ void HashToString( Local<Object> obj, Persistent<String> &ret )
 {
     Isolate *isolate = Isolate::GetCurrent();
     HandleScope	scope(isolate);
-    Local<Array> props = obj->GetOwnPropertyNames();
-    int length = props->Length();
+	Local<Context> context = isolate->GetCurrentContext();
+    MaybeLocal<Array> props = obj->GetOwnPropertyNames(context);
+    int length = props.ToLocalChecked()->Length();
     std::string params = "";
     bool	first = true;
     for( int i = 0; i < length; i++ ) {
-	Local<String> key = props->Get(i).As<String>();
+	Local<String> key = props.ToLocalChecked()->Get(i).As<String>();
 	Local<String> val = obj->Get(key).As<String>();
-	String::Utf8Value key_utf8( key );
-	String::Utf8Value val_utf8( val );
+	String::Utf8Value key_utf8( isolate, key );
+	String::Utf8Value val_utf8( isolate, val );
 	if( !first ) {
 	    params += ";";
 	}
@@ -899,6 +907,7 @@ Connection::Connection( const FunctionCallbackInfo<Value> &args )
 /***************************************************************/
 {
     Isolate *isolate = args.GetIsolate();
+	Local<Context> context = isolate->GetCurrentContext();
     HandleScope scope( isolate );
     uv_mutex_init(&conn_mutex);
     conn = NULL;
@@ -911,14 +920,14 @@ Connection::Connection( const FunctionCallbackInfo<Value> &args )
     if( args.Length() == 1 ) {
 	//CheckArgType( args[0] );
 	if( args[0]->IsString() ) {
-	    Local<String> str = args[0]->ToString();
-	    int string_len = str->Utf8Length();
+	    MaybeLocal<String> str = args[0]->ToString(context);
+	    int string_len = str.ToLocalChecked()->Utf8Length(isolate);
 	    char *buf = new char[string_len+1];
-	    str->WriteUtf8( buf );
+	    str.ToLocalChecked()->WriteUtf8(isolate, buf );
 	    _arg.Reset( isolate, String::NewFromUtf8( isolate, buf ) );
 	    delete [] buf;
 	} else if( args[0]->IsObject() ) {
-	    HashToString( args[0]->ToObject(), _arg );
+		HashToString(args[0]->ToObject(context).ToLocalChecked(), _arg);
 	} else if( !args[0]->IsUndefined() && !args[0]->IsNull() ) {
 	    throwError( JS_ERR_INVALID_ARGUMENTS );
 	} else {
@@ -977,6 +986,7 @@ void Connection::Init( Isolate *isolate )
 /***************************************/
 {
     HandleScope scope( isolate );
+	Local<Context> context = isolate->GetCurrentContext();
     // Prepare constructor template
     Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
     tpl->SetClassName( String::NewFromUtf8( isolate, "Connection" ) );
@@ -992,7 +1002,7 @@ void Connection::Init( Isolate *isolate )
     NODE_SET_PROTOTYPE_METHOD( tpl, "rollback", rollback );
     NODE_SET_PROTOTYPE_METHOD( tpl, "connected", connected );
 
-    constructor.Reset( isolate, tpl->GetFunction() );
+    constructor.Reset( isolate, tpl->GetFunction(context).ToLocalChecked() );
 }
 
 void Connection::New( const FunctionCallbackInfo<Value> &args )
@@ -1026,7 +1036,7 @@ void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
     Isolate *isolate = args.GetIsolate();
     HandleScope scope( isolate );
     const unsigned argc = 1;
-    Handle<Value> argv[argc] = { args[0] };
+	Local<Value> argv[argc] = { args[0] };
     Local<Function> cons = Local<Function>::New( isolate, constructor );
 #if NODE_MAJOR_VERSION >= 10
     Local<Context> env = isolate->GetCurrentContext();

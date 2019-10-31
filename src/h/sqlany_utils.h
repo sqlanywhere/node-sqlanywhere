@@ -157,7 +157,7 @@ void callBack( std::string *		str,
 #endif
 
 bool getBindParameters( std::vector<ExecuteData *>		&execData
-			, Handle<Value>				arg
+			, Local<Value>				arg
 			, std::vector<a_sqlany_bind_param> 	&params
 			, unsigned				&num_rows
     );

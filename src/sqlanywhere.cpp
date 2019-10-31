@@ -3,6 +3,7 @@
 // ***************************************************************************
 #include "nodever_cover.h"
 #include "sqlany_utils.h"
+#include "nan.h"
 
 #if !v010
 
@@ -454,7 +455,7 @@ NODE_API_FUNC( Connection::exec )
 	return;
     }
     
-    String::Utf8Value 		param0( args[0]->ToString() );
+    Nan::Utf8String 		param0( args[0]->ToString(isolate) );
     
     executeBaton *baton = new executeBaton();
     baton->obj = obj;
@@ -641,7 +642,7 @@ NODE_API_FUNC( Connection::prepare )
 	return;
     }
     
-    String::Utf8Value 		param0( args[0]->ToString() );
+    Nan::Utf8String 		param0( args[0]->ToString(isolate) );
     
     prepareBaton *baton = new prepareBaton();
     baton->obj = obj;
@@ -797,6 +798,7 @@ NODE_API_FUNC( Connection::connect )
 /**********************************/
 {
     Isolate *isolate = args.GetIsolate();
+	Local<Context> context = isolate->GetCurrentContext();
     HandleScope scope( isolate );
     int		num_args = args.Length();
     Connection *obj;
@@ -856,26 +858,26 @@ NODE_API_FUNC( Connection::connect )
     baton->sqlca_connection = sqlca_connection;
     
     if( sqlca_connection ) {
-	baton->sqlca = (void *)(long)args[0]->NumberValue();
+	baton->sqlca = (void *)(long)args[0]->NumberValue(context).ToChecked();
 	
     } else {
 	Local<String> localArg = Local<String>::New( isolate, obj->_arg );
 	if( localArg->Length() > 0 ) {
-	    String::Utf8Value param0( localArg );
+	    Nan::Utf8String param0( localArg );
 	    baton->conn_string = std::string(*param0);
 	} else {
 	    baton->conn_string = std::string();
 	}
 	if( arg_is_string ) {
-	    String::Utf8Value param0( args[0]->ToString() );
+	    Nan::Utf8String param0( args[0]->ToString(isolate) );
 	    baton->conn_string.append( ";" );
 	    baton->conn_string.append(*param0);
 	} else if( arg_is_object ) {
 	    Persistent<String> arg_string;
-	    HashToString( args[0]->ToObject(), arg_string );
+	    HashToString( args[0]->ToObject(context).ToLocalChecked(), arg_string );
 	    Local<String> local_arg_string = 
 		Local<String>::New( isolate, arg_string );
-	    String::Utf8Value param0( local_arg_string );
+	    Nan::Utf8String param0( local_arg_string );
 	    baton->conn_string.append( ";" );
 	    baton->conn_string.append(*param0);
 	    arg_string.Reset();
