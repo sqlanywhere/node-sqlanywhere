@@ -200,112 +200,112 @@ static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
 				   unsigned				&num_rows )
 /*********************************************************************************/
 {
-	//Isolate* isolate = Isolate::GetCurrent();
-	//Local<Context> context = isolate->GetCurrentContext();
-	//Local<Array>	rows = Local<Array>::Cast( arg );
- //   num_rows = rows->Length();
+	Isolate* isolate = Isolate::GetCurrent();
+	Local<Context> context = isolate->GetCurrentContext();
+	Local<Array>	rows = Local<Array>::Cast( arg );
+   num_rows = rows->Length();
 
-	//Local<Array>	row0 = Local<Array>::Cast( rows->Get(0) );
- //   unsigned		num_cols = row0->Length();
- //   unsigned		c;
+	Local<Array>	row0 = Local<Array>::Cast( rows->Get(0) );
+   unsigned		num_cols = row0->Length();
+   unsigned		c;
 
- //   if( num_cols == 0 ) {
-	//// if an empty array was passed in, we still need ExecuteData
-	//ExecuteData *ex = new ExecuteData;
-	//execData.push_back( ex );
-	//return true;
- //   }
+   if( num_cols == 0 ) {
+	// if an empty array was passed in, we still need ExecuteData
+	ExecuteData *ex = new ExecuteData;
+	execData.push_back( ex );
+	return true;
+   }
 
- //   // Make sure that each array in the list has the same number and types
- //   // of values
- //   for( unsigned int r = 1; r < num_rows; r++ ) {
-	//Local<Array>	row = Local<Array>::Cast( rows->Get(r) );
-	//for( c = 0; c < num_cols; c++ ) {
-	//	Local<Value> val0 = row0->Get(c);
-	//	Local<Value> val = row->Get(c);
+   // Make sure that each array in the list has the same number and types
+   // of values
+   for( unsigned int r = 1; r < num_rows; r++ ) {
+	Local<Array>	row = Local<Array>::Cast( rows->Get(r) );
+	for( c = 0; c < num_cols; c++ ) {
+		Local<Value> val0 = row0->Get(c);
+		Local<Value> val = row->Get(c);
 
-	//    if( ( val0->IsInt32() || val0->IsNumber() ) &&
-	//	( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
-	//	return false;
-	//    }
-	//    if( val0->IsString() &&
-	//	!val->IsString() && !val->IsNull() ) {
-	//	return false;
-	//    }
-	//    if( Buffer::HasInstance( val0 ) &&
-	//	!Buffer::HasInstance( val ) && !val->IsNull() ) {
-	//	return false;
-	//    }
-	//}
- //   }
+	   if( ( val0->IsInt32() || val0->IsNumber() ) &&
+		( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
+		return false;
+	   }
+	   if( val0->IsString() &&
+		!val->IsString() && !val->IsNull() ) {
+		return false;
+	   }
+	   if( Buffer::HasInstance( val0 ) &&
+		!Buffer::HasInstance( val ) && !val->IsNull() ) {
+		return false;
+	   }
+	}
+   }
 
- //   for( c = 0; c < num_cols; c++ ) {
-	//a_sqlany_bind_param 	param;
-	//memset( &param, 0, sizeof( param ) );
+   for( c = 0; c < num_cols; c++ ) {
+	a_sqlany_bind_param 	param;
+	memset( &param, 0, sizeof( param ) );
 
-	//ExecuteData *ex = new ExecuteData;
-	//execData.push_back( ex );
+	ExecuteData *ex = new ExecuteData;
+	execData.push_back( ex );
 
-	//double *	param_double = new double[num_rows];
-	//ex->addNum( param_double );
-	//char **		char_arr = new char *[num_rows];
-	//size_t *	len = new size_t[num_rows];
-	//ex->addStrings( char_arr, len );
-	//sacapi_bool *	is_null = new sacapi_bool[num_rows];
-	//ex->addNull( is_null );
-	//param.value.is_null	= is_null;
-	//param.value.is_address	= false;
+	double *	param_double = new double[num_rows];
+	ex->addNum( param_double );
+	char **		char_arr = new char *[num_rows];
+	size_t *	len = new size_t[num_rows];
+	ex->addStrings( char_arr, len );
+	sacapi_bool *	is_null = new sacapi_bool[num_rows];
+	ex->addNull( is_null );
+	param.value.is_null	= is_null;
+	param.value.is_address	= false;
 
-	//if( row0->Get(c)->IsInt32() || row0->Get(c)->IsNumber() ) {
-	//    param.value.type	= A_DOUBLE;
-	//    param.value.buffer	= (char *)( param_double );
+	if( row0->Get(c)->IsInt32() || row0->Get(c)->IsNumber() ) {
+	   param.value.type	= A_DOUBLE;
+	   param.value.buffer	= (char *)( param_double );
 
-	//} else if( row0->Get(c)->IsString() ) {
-	//    param.value.type	= A_STRING;
-	//    param.value.buffer	= (char *)char_arr;
-	//    param.value.length	= len;
-	//    param.value.is_address = true;
+	} else if( row0->Get(c)->IsString() ) {
+	   param.value.type	= A_STRING;
+	   param.value.buffer	= (char *)char_arr;
+	   param.value.length	= len;
+	   param.value.is_address = true;
 
-	//} else if( Buffer::HasInstance( row0->Get(c) ) ) {
-	//    param.value.type	= A_BINARY;
-	//    param.value.buffer	= (char *)char_arr;
-	//    param.value.length	= len;
-	//    param.value.is_address = true;
-	//    
-	//} else if( row0->Get(c)->IsNull() ) {
+	} else if( Buffer::HasInstance( row0->Get(c) ) ) {
+	   param.value.type	= A_BINARY;
+	   param.value.buffer	= (char *)char_arr;
+	   param.value.length	= len;
+	   param.value.is_address = true;
+	   
+	} else if( row0->Get(c)->IsNull() ) {
 
-	//} else{
-	//    return false;
-	//}
+	} else{
+	   return false;
+	}
 
-	//for( unsigned int r = 0; r < num_rows; r++ ) {
-	//	Local<Array>	bind_params = Local<Array>::Cast( rows->Get(r) );
-	//
-	//    is_null[r] = false;
-	//    if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
-	//	param_double[r] = bind_params->Get(c)->NumberValue(context).ToChecked();
-	//
-	//    } else if( bind_params->Get(c)->IsString() ) {
-	//	Nan::Utf8String paramValue( bind_params->Get(c)->ToString(isolate) );
-	//	const char* param_string = (*paramValue);
-	//	len[r] = (size_t)paramValue.length();
-	//	char *param_char = new char[len[r] + 1];
-	//	char_arr[r] = param_char;
-	//	memcpy( param_char, param_string, len[r] + 1 );
-	//	
-	//    } else if( Buffer::HasInstance( bind_params->Get(c) ) ) {
-	//	len[r] = Buffer::Length( bind_params->Get(c) );
-	//	char *param_char = new char[len[r]];
-	//	char_arr[r] = param_char;
-	//	memcpy( param_char, Buffer::Data( bind_params->Get(c) ), len[r] );
+	for( unsigned int r = 0; r < num_rows; r++ ) {
+		Local<Array>	bind_params = Local<Array>::Cast( rows->Get(r) );
+	
+	   is_null[r] = false;
+	   if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
+		param_double[r] = bind_params->Get(c)->NumberValue(context).ToChecked();
+	
+	   } else if( bind_params->Get(c)->IsString() ) {
+		Nan::Utf8String paramValue( bind_params->Get(c)->ToString(isolate) );
+		const char* param_string = (*paramValue);
+		len[r] = (size_t)paramValue.length();
+		char *param_char = new char[len[r] + 1];
+		char_arr[r] = param_char;
+		memcpy( param_char, param_string, len[r] + 1 );
+		
+	   } else if( Buffer::HasInstance( bind_params->Get(c) ) ) {
+		len[r] = Buffer::Length( bind_params->Get(c) );
+		char *param_char = new char[len[r]];
+		char_arr[r] = param_char;
+		memcpy( param_char, Buffer::Data( bind_params->Get(c) ), len[r] );
 
-	//    } else if( bind_params->Get(c)->IsNull() ) {
-	//	is_null[r] = true;
-	//    }
-	//}
- //   
-	//params.push_back( param );
- //   }
+	   } else if( bind_params->Get(c)->IsNull() ) {
+		is_null[r] = true;
+	   }
+	}
+   
+	params.push_back( param );
+   }
 
     return true;	   
 }
