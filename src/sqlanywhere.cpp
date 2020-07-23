@@ -5,7 +5,7 @@
 #include "sqlany_utils.h"
 #include "nan.h"
 
-#if !v010
+#if NODE_MAJOR_VERSION >= 12
 
 using namespace v8;
 
@@ -1234,11 +1234,7 @@ void init( Local<Object> exports )
 /********************************/
 {
     uv_mutex_init(&api_mutex);
-#if v012
-    Isolate *isolate = Isolate::GetCurrent();
-#else
     Isolate *isolate = exports->GetIsolate();
-#endif
     StmtObject::Init( isolate );
     Connection::Init( isolate );
     NODE_SET_METHOD( exports, "createConnection", Connection::NewInstance );
@@ -1246,4 +1242,4 @@ void init( Local<Object> exports )
 
 NODE_MODULE( DRIVER_NAME, init )
 
-#endif // !v010
+#endif //NODE_MAJOR_VERSION >= 12

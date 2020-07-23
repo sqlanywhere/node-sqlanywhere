@@ -5,7 +5,7 @@
 #include "sqlany_utils.h"
 #include "nan.h"
 
-#if !v010
+#if NODE_MAJOR_VERSION >= 12
 
 using namespace v8;
 using namespace node;
@@ -53,6 +53,15 @@ void getErrorMsg( int code, std::string &str )
 
 }
 
+v8::Local<v8::String> GetUtf8String(v8::Isolate *isolate, std::string msg) {
+	auto ret = String::NewFromUtf8(isolate, msg.c_str());
+#if NODE_MAJOR_VERSION == 14
+	return ret.ToLocalChecked();
+#else
+	return ret;
+#endif
+}
+
 void getErrorMsg( a_sqlany_connection *conn, std::string &str )
 /*************************************************************/
 {
@@ -74,7 +83,7 @@ void throwError( a_sqlany_connection *conn )
     std::string message;
     getErrorMsg( conn, message );
     isolate->ThrowException(
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ).ToLocalChecked()) );
+	Exception::Error( GetUtf8String(isolate, message.c_str() )) );
 }
 
 void throwError( int code )
@@ -85,7 +94,7 @@ void throwError( int code )
 
     getErrorMsg( code, message );
     isolate->ThrowException(
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ).ToLocalChecked()) );
+	Exception::Error(GetUtf8String(isolate, message.c_str())) );
 }
 
 void callBack( std::string *		str,
@@ -110,17 +119,13 @@ void callBack( std::string *		str,
 	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
 
 	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ).ToLocalChecked() );
+	    Err = Exception::Error(GetUtf8String(isolate, str->c_str()));
 	}
 
 	int argc = 2;
 	Local<Value> argv[2] = { Err, Result };
 
-#if v012
-	TryCatch try_catch;
-#else
         TryCatch try_catch( isolate );
-#endif
         Nan::Callback *cb = new Nan::Callback( local_callback );
 	cb->Call( argc, argv );
 	if( try_catch.HasCaught()) {
@@ -129,7 +134,7 @@ void callBack( std::string *		str,
     } else {
 	if( str != NULL ) {
 	    isolate->ThrowException(
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ).ToLocalChecked()) );
+		Exception::Error(GetUtf8String(isolate, str->c_str())));
 	}
     }
 }
@@ -169,17 +174,13 @@ void callBack( std::string *		str,
 	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
 
 	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ).ToLocalChecked() );
+	    Err = Exception::Error(GetUtf8String(isolate, str->c_str()));
 	}
 
 	int argc = 2;
 	Local<Value> argv[2] = { Err,  Result };
 
-#if v012
-	TryCatch try_catch;
-#else
         TryCatch try_catch( isolate );
-#endif
         Nan::Callback *cb = new Nan::Callback( callback );
         cb->Call( argc, argv );
 	if( try_catch.HasCaught()) {
@@ -189,7 +190,7 @@ void callBack( std::string *		str,
     } else {
 	if( str != NULL ) {
 	    isolate->ThrowException(
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ).ToLocalChecked()) );
+		Exception::Error(GetUtf8String(isolate, str->c_str())));
 	}
     }
 }
@@ -434,7 +435,7 @@ bool getResultSet( Persistent<Value> &			Result,
 	    for( size_t i = 0; i < num_cols; i++ ) {
 		switch( col_types[count] ) {
 		    case A_INVALID_TYPE:
-			curr_row->Set(context, String::NewFromUtf8( isolate, colNames[i] ).ToLocalChecked(),
+			curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 				       Null( isolate ) );
 			break;
 
@@ -444,10 +445,10 @@ bool getResultSet( Persistent<Value> &			Result,
 		    case A_VAL8:
 		    case A_UVAL8:
 			if( execData->intIsNull( count_int ) ) {
-			    curr_row->Set(context, String::NewFromUtf8( isolate, colNames[i] ).ToLocalChecked(),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-			    curr_row->Set(context, String::NewFromUtf8( isolate, colNames[i] ).ToLocalChecked(),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Integer::New( isolate, execData->getInt( count_int ) ) );
 			}
 			count_int++;
@@ -458,10 +459,10 @@ bool getResultSet( Persistent<Value> &			Result,
 		    case A_VAL64:
 		    case A_DOUBLE:
 			if( execData->numIsNull( count_num ) ) {
-			    curr_row->Set(context, String::NewFromUtf8( isolate, colNames[i] ).ToLocalChecked(),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-			    curr_row->Set(context, String::NewFromUtf8( isolate, colNames[i] ).ToLocalChecked(),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Number::New( isolate, execData->getNum( count_num ) ) );
 			}
 			count_num++;
@@ -469,24 +470,14 @@ bool getResultSet( Persistent<Value> &			Result,
 
 		    case A_BINARY:
 			if( execData->stringIsNull( count_string ) ) {
-			    curr_row->Set(context, String::NewFromUtf8( isolate, colNames[i] ).ToLocalChecked(),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-#if v012
-			    Local<Object> buf = node::Buffer::New(
-				isolate, execData->getString( count_string ),
-				execData->getLen( count_string ) );
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-					   buf );
-#else
 			    MaybeLocal<Object> mbuf = node::Buffer::Copy(
 				isolate, execData->getString( count_string ),
 				execData->getLen( count_string ) );
 			    Local<Object> buf = mbuf.ToLocalChecked();
-#endif
-			    curr_row->Set(context, String::NewFromUtf8( isolate,
-								colNames[i] ).ToLocalChecked(),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   buf );
 			}
 			count_string++;
@@ -494,22 +485,14 @@ bool getResultSet( Persistent<Value> &			Result,
 
 		    case A_STRING:
 			if( execData->stringIsNull( count_string ) ) {
-			    curr_row->Set(context, String::NewFromUtf8( isolate, colNames[i] ).ToLocalChecked(),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-			    curr_row->Set(context, String::NewFromUtf8( isolate,
-								colNames[i] ).ToLocalChecked(),
-#if v012
-					   String::NewFromUtf8( isolate,
-								execData->getString( count_string ),
-								String::NewStringType::kNormalString,
-								(int)execData->getLen( count_string ) )
-#else
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   String::NewFromUtf8( isolate,
 								execData->getString( count_string ),
 								NewStringType::kNormal,
 								(int)execData->getLen( count_string ) ).ToLocalChecked()
-#endif
 				);
 			}
 			count_string++;
@@ -765,7 +748,7 @@ void StmtObject::Init( Isolate *isolate )
 	Local<Context> context = isolate->GetCurrentContext();
     // Prepare constructor template
     Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "StmtObject" ).ToLocalChecked());
+	tpl->SetClassName(GetUtf8String(isolate, "StmtObject"));
     tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
 
     // Prototype
@@ -857,7 +840,7 @@ void HashToString( Local<Object> obj, Persistent<String> &ret )
 	params += "=";
 	params += std::string(*val_utf8);
     }
-    ret.Reset( isolate, String::NewFromUtf8( isolate, params.c_str() ).ToLocalChecked());
+	ret.Reset(isolate, GetUtf8String(isolate, params.c_str()));
 }
 
 #if 0
@@ -927,17 +910,17 @@ Connection::Connection( const FunctionCallbackInfo<Value> &args )
 	    int string_len = str.ToLocalChecked()->Utf8Length(isolate);
 	    char *buf = new char[string_len+1];
 	    str.ToLocalChecked()->WriteUtf8(isolate, buf );
-	    _arg.Reset( isolate, String::NewFromUtf8( isolate, buf ).ToLocalChecked());
+	    _arg.Reset( isolate, GetUtf8String(isolate, buf));
 	    delete [] buf;
 	} else if( args[0]->IsObject() ) {
 		HashToString(args[0]->ToObject(context).ToLocalChecked(), _arg);
 	} else if( !args[0]->IsUndefined() && !args[0]->IsNull() ) {
 	    throwError( JS_ERR_INVALID_ARGUMENTS );
 	} else {
-	    _arg.Reset( isolate, String::NewFromUtf8( isolate, "" ).ToLocalChecked());
+	    _arg.Reset( isolate, GetUtf8String(isolate, ""));
 	}
     } else {
-	_arg.Reset( isolate, String::NewFromUtf8( isolate, "" ).ToLocalChecked());
+	_arg.Reset( isolate, GetUtf8String(isolate, ""));
     }
 }
 
@@ -992,7 +975,7 @@ void Connection::Init( Isolate *isolate )
 	Local<Context> context = isolate->GetCurrentContext();
     // Prepare constructor template
     Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "Connection" ).ToLocalChecked());
+    tpl->SetClassName(GetUtf8String(isolate, "Connection"));
     tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
 
     // Prototype
@@ -1051,4 +1034,4 @@ void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
     args.GetReturnValue().Set( instance );
 }
 
-#endif // !v010
+#endif //NODE_MAJOR_VERSION >= 12
