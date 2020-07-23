@@ -5,7 +5,7 @@
 #include "sqlany_utils.h"
 #include "nan.h"
 
-#if !v010
+#if NODE_MAJOR_VERSION >= 12
 
 using namespace v8;
 using namespace node;
@@ -17,7 +17,7 @@ void getErrorMsg( int code, std::string &str )
     message << "Code: ";
     message << code;
     message << " Msg: ";
-    
+
     switch( code ) {
 	case JS_ERR_INVALID_OBJECT:
 	    message << "Invalid Object";
@@ -53,6 +53,15 @@ void getErrorMsg( int code, std::string &str )
 
 }
 
+v8::Local<v8::String> GetUtf8String(v8::Isolate *isolate, std::string msg) {
+	auto ret = String::NewFromUtf8(isolate, msg.c_str());
+#if NODE_MAJOR_VERSION == 14
+	return ret.ToLocalChecked();
+#else
+	return ret;
+#endif
+}
+
 void getErrorMsg( a_sqlany_connection *conn, std::string &str )
 /*************************************************************/
 {
@@ -73,8 +82,8 @@ void throwError( a_sqlany_connection *conn )
     Isolate *isolate = Isolate::GetCurrent();
     std::string message;
     getErrorMsg( conn, message );
-    isolate->ThrowException( 
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ) ) );
+    isolate->ThrowException(
+	Exception::Error( GetUtf8String(isolate, message.c_str() )) );
 }
 
 void throwError( int code )
@@ -82,9 +91,10 @@ void throwError( int code )
 {
     Isolate *isolate = Isolate::GetCurrent();
     std::string message;
+
     getErrorMsg( code, message );
-    isolate->ThrowException( 
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ) ) );
+    isolate->ThrowException(
+	Exception::Error(GetUtf8String(isolate, message.c_str())) );
 }
 
 void callBack( std::string *		str,
@@ -103,23 +113,19 @@ void callBack( std::string *		str,
 	    throwError( JS_ERR_INVALID_ARGUMENTS );
 	    return;
 	}
-	
+
 	Local<Value> Err;
 	if( str == NULL ) {
 	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
-	
+
 	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) );
+	    Err = Exception::Error(GetUtf8String(isolate, str->c_str()));
 	}
-	
+
 	int argc = 2;
 	Local<Value> argv[2] = { Err, Result };
-	
-#if v012
-	TryCatch try_catch;
-#else
+
         TryCatch try_catch( isolate );
-#endif
         Nan::Callback *cb = new Nan::Callback( local_callback );
 	cb->Call( argc, argv );
 	if( try_catch.HasCaught()) {
@@ -128,7 +134,7 @@ void callBack( std::string *		str,
     } else {
 	if( str != NULL ) {
 	    isolate->ThrowException(
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) ) );
+		Exception::Error(GetUtf8String(isolate, str->c_str())));
 	}
     }
 }
@@ -162,81 +168,79 @@ void callBack( std::string *		str,
 	    return;
 	}
 	Local<Function> callback = Local<Function>::Cast(arg);
-	
+
 	Local<Value> Err;
 	if( str == NULL ) {
 	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
-	
+
 	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) );
+	    Err = Exception::Error(GetUtf8String(isolate, str->c_str()));
 	}
-	
+
 	int argc = 2;
 	Local<Value> argv[2] = { Err,  Result };
-	
-#if v012
-	TryCatch try_catch;
-#else
+
         TryCatch try_catch( isolate );
-#endif
         Nan::Callback *cb = new Nan::Callback( callback );
         cb->Call( argc, argv );
 	if( try_catch.HasCaught()) {
 	    node::FatalException( isolate, try_catch );
 	}
-	
+
     } else {
 	if( str != NULL ) {
-	    isolate->ThrowException( 
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) ) );
+	    isolate->ThrowException(
+		Exception::Error(GetUtf8String(isolate, str->c_str())));
 	}
     }
 }
 
 static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
-				   Handle<Value>			arg,
+	Local<Value>			arg,
 				   std::vector<a_sqlany_bind_param> &	params,
 				   unsigned				&num_rows )
 /*********************************************************************************/
 {
-    Handle<Array>	rows = Handle<Array>::Cast( arg );
-    num_rows = rows->Length();
+	Isolate* isolate = Isolate::GetCurrent();
+	Local<Context> context = isolate->GetCurrentContext();
+	Local<Array>	rows = Local<Array>::Cast( arg );
+   num_rows = rows->Length();
 
-    Handle<Array>	row0 = Handle<Array>::Cast( rows->Get(0) );
-    unsigned		num_cols = row0->Length();
-    unsigned		c;
+	Local<Array>	row0 = Local<Array>::Cast( rows->Get(context, 0).ToLocalChecked() );
+   unsigned		num_cols = row0->Length();
+   unsigned		c;
 
-    if( num_cols == 0 ) {
+   if( num_cols == 0 ) {
 	// if an empty array was passed in, we still need ExecuteData
 	ExecuteData *ex = new ExecuteData;
 	execData.push_back( ex );
 	return true;
-    }
+   }
 
-    // Make sure that each array in the list has the same number and types
-    // of values
-    for( unsigned int r = 1; r < num_rows; r++ ) {
-	Handle<Array>	row = Handle<Array>::Cast( rows->Get(r) );
+   // Make sure that each array in the list has the same number and types
+   // of values
+   for( unsigned int r = 1; r < num_rows; r++ ) {
+	Local<Array>	row = Local<Array>::Cast( rows->Get(context, r).ToLocalChecked() );
 	for( c = 0; c < num_cols; c++ ) {
-	    Handle<Value> val0 = row0->Get(c);
-	    Handle<Value> val = row->Get(c);
+		Local<Value> val0 = row0->Get(context, c).ToLocalChecked();
+		Local<Value> val = row->Get(context, c).ToLocalChecked();
 
-	    if( ( val0->IsInt32() || val0->IsNumber() ) &&
+	   if( ( val0->IsInt32() || val0->IsNumber() ) &&
 		( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
 		return false;
-	    }
-	    if( val0->IsString() &&
+	   }
+	   if( val0->IsString() &&
 		!val->IsString() && !val->IsNull() ) {
 		return false;
-	    }
-	    if( Buffer::HasInstance( val0 ) &&
+	   }
+	   if( Buffer::HasInstance( val0 ) &&
 		!Buffer::HasInstance( val ) && !val->IsNull() ) {
 		return false;
-	    }
+	   }
 	}
-    }
+   }
 
-    for( c = 0; c < num_cols; c++ ) {
+   for( c = 0; c < num_cols; c++ ) {
 	a_sqlany_bind_param 	param;
 	memset( &param, 0, sizeof( param ) );
 
@@ -253,67 +257,70 @@ static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
 	param.value.is_null	= is_null;
 	param.value.is_address	= false;
 
-	if( row0->Get(c)->IsInt32() || row0->Get(c)->IsNumber() ) {
-	    param.value.type	= A_DOUBLE;
-	    param.value.buffer	= (char *)( param_double );
+	if( row0->Get(context, c).ToLocalChecked()->IsInt32() || row0->Get(context, c).ToLocalChecked()->IsNumber() ) {
+	   param.value.type	= A_DOUBLE;
+	   param.value.buffer	= (char *)( param_double );
 
-	} else if( row0->Get(c)->IsString() ) {
-	    param.value.type	= A_STRING;
-	    param.value.buffer	= (char *)char_arr;
-	    param.value.length	= len;
-	    param.value.is_address = true;
+	} else if( row0->Get(context, c).ToLocalChecked()->IsString() ) {
+	   param.value.type	= A_STRING;
+	   param.value.buffer	= (char *)char_arr;
+	   param.value.length	= len;
+	   param.value.is_address = true;
 
-	} else if( Buffer::HasInstance( row0->Get(c) ) ) {
-	    param.value.type	= A_BINARY;
-	    param.value.buffer	= (char *)char_arr;
-	    param.value.length	= len;
-	    param.value.is_address = true;
-	    
-	} else if( row0->Get(c)->IsNull() ) {
+	} else if( Buffer::HasInstance( row0->Get(context, c).ToLocalChecked() ) ) {
+	   param.value.type	= A_BINARY;
+	   param.value.buffer	= (char *)char_arr;
+	   param.value.length	= len;
+	   param.value.is_address = true;
+
+	} else if( row0->Get(context, c).ToLocalChecked()->IsNull() ) {
 
 	} else{
-	    return false;
+	   return false;
 	}
 
 	for( unsigned int r = 0; r < num_rows; r++ ) {
-	    Handle<Array>	bind_params = Handle<Array>::Cast( rows->Get(r) );
-	
-	    is_null[r] = false;
-	    if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
-		param_double[r] = bind_params->Get(c)->NumberValue();
-	
-	    } else if( bind_params->Get(c)->IsString() ) {
-		String::Utf8Value paramValue( bind_params->Get(c)->ToString() );
+		Local<Array>	bind_params = Local<Array>::Cast( rows->Get(context, r).ToLocalChecked());
+
+	   is_null[r] = false;
+	   if( bind_params->Get(context, c).ToLocalChecked()->IsInt32() || bind_params->Get(context, c).ToLocalChecked()->IsNumber() ) {
+		param_double[r] = bind_params->Get(context, c).ToLocalChecked()->NumberValue(context).ToChecked();
+
+	   } else if( bind_params->Get(context, c).ToLocalChecked()->IsString() ) {
+		Nan::Utf8String paramValue( bind_params->Get(context, c).ToLocalChecked() );
 		const char* param_string = (*paramValue);
 		len[r] = (size_t)paramValue.length();
 		char *param_char = new char[len[r] + 1];
 		char_arr[r] = param_char;
 		memcpy( param_char, param_string, len[r] + 1 );
-		
-	    } else if( Buffer::HasInstance( bind_params->Get(c) ) ) {
-		len[r] = Buffer::Length( bind_params->Get(c) );
+
+	   } else if( Buffer::HasInstance( bind_params->Get(context, c).ToLocalChecked()) ) {
+		len[r] = Buffer::Length( bind_params->Get(context, c).ToLocalChecked());
 		char *param_char = new char[len[r]];
 		char_arr[r] = param_char;
-		memcpy( param_char, Buffer::Data( bind_params->Get(c) ), len[r] );
+		memcpy( param_char, Buffer::Data( bind_params->Get(context, c).ToLocalChecked()), len[r] );
 
-	    } else if( bind_params->Get(c)->IsNull() ) {
+	   } else if( bind_params->Get(context, c).ToLocalChecked()->IsNull() ) {
 		is_null[r] = true;
-	    }
+	   }
 	}
-    
-	params.push_back( param );
-    }
 
-    return true;	   
+	params.push_back( param );
+   }
+
+    return true;
 }
 
 bool getBindParameters( std::vector<ExecuteData *>		&execData,
-			Handle<Value> 				arg,
+	Local<Value> 				arg,
 			std::vector<a_sqlany_bind_param> &	params,
 			unsigned				&num_rows )
 /*************************************************************************/
 {
-    Handle<Array>		bind_params = Handle<Array>::Cast( arg );
+
+	Isolate* isolate = Isolate::GetCurrent();
+	Local<Context> context = isolate->GetCurrentContext();
+	Local<Array>		bind_params = Local<Array>::Cast( arg );
 
     if( bind_params->Length() == 0 ) {
 	// if an empty array was passed in, we still need ExecuteData
@@ -322,7 +329,7 @@ bool getBindParameters( std::vector<ExecuteData *>		&execData,
 	return true;
     }
 
-    if( bind_params->Get(0)->IsArray() ) {
+    if( bind_params->Get(context, 0).ToLocalChecked()->IsArray() ) {
 	return getWideBindParameters( execData, arg, params, num_rows );
     }
     num_rows = 1;
@@ -334,68 +341,68 @@ bool getBindParameters( std::vector<ExecuteData *>		&execData,
 	a_sqlany_bind_param 	param;
 	memset( &param, 0, sizeof( param ) );
 
-	if( bind_params->Get(i)->IsInt32() ) {
+	if( bind_params->Get(context, i).ToLocalChecked()->IsInt32() ) {
 	    int *param_int = new int;
-	    *param_int = bind_params->Get(i)->Int32Value();
+	    *param_int = bind_params->Get(context, i).ToLocalChecked()->Int32Value(context).ToChecked();
 	    ex->addInt( param_int );
 	    param.value.buffer = (char *)( param_int );
 	    param.value.type   = A_VAL32;
-	    
-	} else if( bind_params->Get(i)->IsNumber() ) {
+
+	} else if( bind_params->Get(context, i).ToLocalChecked()->IsNumber() ) {
 	    double *param_double = new double;
-	    *param_double = bind_params->Get(i)->NumberValue(); // Remove Round off Error
+	    *param_double = bind_params->Get(context, i).ToLocalChecked()->NumberValue(context).ToChecked(); // Remove Round off Error
 	    ex->addNum( param_double );
 	    param.value.buffer = (char *)( param_double );
 	    param.value.type   = A_DOUBLE;
-	
-	} else if( bind_params->Get(i)->IsString() ) {
-	    String::Utf8Value paramValue( bind_params->Get(i)->ToString() );
+
+	} else if( bind_params->Get(context, i).ToLocalChecked()->IsString() ) {
+		Nan::Utf8String paramValue( bind_params->Get(context, i).ToLocalChecked() );
 	    const char* param_string = (*paramValue);
 	    size_t *len = new size_t;
 	    *len = (size_t)paramValue.length();
-	    
+
 	    char **char_arr = new char *;
 	    char *param_char = new char[*len + 1];
 	    *char_arr = param_char;
 
 	    memcpy( param_char, param_string, ( *len ) + 1 );
 	    ex->addStrings( char_arr, len );
-	    
+
 	    param.value.type = A_STRING;
 	    param.value.buffer = param_char;
 	    param.value.length = len;
 	    param.value.buffer_size = *len + 1;
-	    
-	} else if( Buffer::HasInstance( bind_params->Get(i) ) ) {
+
+	} else if( Buffer::HasInstance( bind_params->Get(context, i).ToLocalChecked() ) ) {
 	    size_t *len = new size_t;
-	    *len = Buffer::Length( bind_params->Get(i) );
+	    *len = Buffer::Length( bind_params->Get(context, i).ToLocalChecked() );
 	    char **char_arr = new char *;
 	    char *param_char = new char[*len];
 	    *char_arr = param_char;
-	    
-	    memcpy( param_char, Buffer::Data( bind_params->Get(i) ), *len );
+
+	    memcpy( param_char, Buffer::Data( bind_params->Get(context, i).ToLocalChecked() ), *len );
 	    ex->addStrings( char_arr, len );
-	    
+
 	    param.value.type = A_BINARY;
 	    param.value.buffer = param_char;
 	    param.value.length = len;
 	    param.value.buffer_size = sizeof( param_char );
-	    
-	} else if( bind_params->Get(i)->IsNull() ) {
+
+	} else if( bind_params->Get(context, i).ToLocalChecked()->IsNull() ) {
 	    param.value.type = A_STRING;
 	    sacapi_bool *is_null = new sacapi_bool;
 	    param.value.is_null = is_null;
 	    ex->addNull( is_null );
 	    is_null[0] = true;
-	    
+
 	} else{
 	    return false;
 	}
-	    
+
 	params.push_back( param );
     }
 
-    return true;	   
+    return true;
 }
 
 bool getResultSet( Persistent<Value> &			Result,
@@ -406,6 +413,7 @@ bool getResultSet( Persistent<Value> &			Result,
 /*****************************************************************/
 {
     Isolate *isolate = Isolate::GetCurrent();
+	Local<Context> context = isolate->GetCurrentContext();
     HandleScope scope( isolate );
     int 	num_rows = 0;
     size_t	num_cols = colNames.size();
@@ -414,7 +422,7 @@ bool getResultSet( Persistent<Value> &			Result,
 	Result.Reset( isolate, Integer::New( isolate, rows_affected ) );
 	return true;
     }
-    
+
     if( num_cols > 0 ) {
 	size_t count = 0;
 	size_t count_int = 0, count_num = 0, count_string = 0;
@@ -427,7 +435,7 @@ bool getResultSet( Persistent<Value> &			Result,
 	    for( size_t i = 0; i < num_cols; i++ ) {
 		switch( col_types[count] ) {
 		    case A_INVALID_TYPE:
-			curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
+			curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 				       Null( isolate ) );
 			break;
 
@@ -437,90 +445,72 @@ bool getResultSet( Persistent<Value> &			Result,
 		    case A_VAL8:
 		    case A_UVAL8:
 			if( execData->intIsNull( count_int ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Integer::New( isolate, execData->getInt( count_int ) ) );
 			}
 			count_int++;
 			break;
-			
+
 		    case A_UVAL32:
 		    case A_UVAL64:
 		    case A_VAL64:
 		    case A_DOUBLE:
 			if( execData->numIsNull( count_num ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Number::New( isolate, execData->getNum( count_num ) ) );
 			}
 			count_num++;
 			break;
-			
+
 		    case A_BINARY:
 			if( execData->stringIsNull( count_string ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-#if v012
-			    Local<Object> buf = node::Buffer::New( 
+			    MaybeLocal<Object> mbuf = node::Buffer::Copy(
 				isolate, execData->getString( count_string ),
-				execData->getLen( count_string ) ); 
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-					   buf );
-#else
-			    MaybeLocal<Object> mbuf = node::Buffer::Copy( 
-				isolate, execData->getString( count_string ),
-				execData->getLen( count_string ) ); 
+				execData->getLen( count_string ) );
 			    Local<Object> buf = mbuf.ToLocalChecked();
-#endif
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   buf );
 			}
 			count_string++;
 			break;
-			
-		    case A_STRING:		    
+
+		    case A_STRING:
 			if( execData->stringIsNull( count_string ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   Null( isolate ) );
 			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-#if v012
-					   String::NewFromUtf8( isolate,
-								execData->getString( count_string ),
-								String::NewStringType::kNormalString,
-								(int)execData->getLen( count_string ) )
-#else
+			    curr_row->Set(context, GetUtf8String(isolate, colNames[i]),
 					   String::NewFromUtf8( isolate,
 								execData->getString( count_string ),
 								NewStringType::kNormal,
 								(int)execData->getLen( count_string ) ).ToLocalChecked()
-#endif
 				);
 			}
 			count_string++;
 			break;
-		
+
 		    default:
 			return false;
 		}
 		count++;
 	    }
-	    ResultSet->Set( num_rows - 1, curr_row );
+	    ResultSet->Set(context, num_rows - 1, curr_row );
 	}
 	Result.Reset( isolate, ResultSet );
     } else {
-	Result.Reset( isolate, Local<Value>::New( isolate, 
+	Result.Reset( isolate, Local<Value>::New( isolate,
 						  Undefined( isolate ) ) );
     }
-    
+
     return true;
 }
 
@@ -531,21 +521,21 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		     std::vector<a_sqlany_data_type> &	col_types )
 /*****************************************************************/
 {
-    
+
     a_sqlany_data_value		value;
     int				num_cols = 0;
-    
+
     rows_affected = api.sqlany_affected_rows( sqlany_stmt );
     num_cols = api.sqlany_num_cols( sqlany_stmt );
-    
-    
+
+
     if( rows_affected > 0 && num_cols < 1 ) {
         return true;
     }
-    
+
     rows_affected = -1;
     if( num_cols > 0 ) {
-	
+
 	for( int i = 0; i < num_cols; i++ ) {
 	    a_sqlany_column_info info;
 	    api.sqlany_get_column_info( sqlany_stmt, i, &info );
@@ -554,7 +544,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 	    memcpy( name, info.name, size );
 	    colNames.push_back( name );
 	}
-	
+
 	int count_string = 0, count_num = 0, count_int = 0;
 	while( api.sqlany_fetch_next( sqlany_stmt ) ) {
 
@@ -564,12 +554,12 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 		    return false;
 		    break;
 		}
-	
+
 		if( *(value.is_null) ) {
 		    col_types.push_back( A_INVALID_TYPE );
 		    continue;
 		}
-		
+
 		switch( value.type ) {
 		    case A_BINARY:
 		    {
@@ -581,7 +571,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_string++;
 			break;
 		    }
-		    
+
 		    case A_STRING:
 		    {
 			size_t *size = new size_t;
@@ -592,7 +582,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_string++;
 			break;
 		    }
-			
+
 		    case A_VAL64:
 		    {
 			double *val = new double;
@@ -601,7 +591,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_num++;
 			break;
 		    }
-			
+
 		    case A_UVAL64:
 		    {
 			double *val = new double;
@@ -610,7 +600,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_num++;
 			break;
 		    }
-			
+
 		    case A_VAL32:
 		    {
 			int *val = new int;
@@ -628,7 +618,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_num++;
 			break;
 		    }
-			
+
 		    case A_VAL16:
 		    {
 			int *val = new int;
@@ -646,7 +636,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_int++;
 			break;
 		    }
-			
+
 		    case A_VAL8:
 		    {
 			int *val = new int;
@@ -655,7 +645,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_int++;
 			break;
 		    }
-			
+
 		    case A_UVAL8:
 		    {
 			int *val = new int;
@@ -664,7 +654,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_int++;
 			break;
 		    }
-			
+
 		    case A_DOUBLE:
 		    {
 			double *val = new double;
@@ -673,7 +663,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 			count_num++;
 			break;
 		    }
-			
+
                     default:
 			return false;
 		}
@@ -681,7 +671,7 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 	    }
 	}
     }
-    
+
     return true;
 }
 
@@ -700,7 +690,7 @@ bool cleanAPI()
 
 // Generic Baton and Callback (After) Function
 // Use this if the function does not have any return values and
-// Does not take any parameters. 
+// Does not take any parameters.
 // Create custom Baton and Callback (After) functions otherwise
 
 void Connection::noParamAfter( uv_work_t *req )
@@ -716,9 +706,9 @@ void Connection::noParamAfter( uv_work_t *req )
 		  baton->callback_required );
 	return;
     }
-    
+
     callBack( NULL, baton->callback, undef, baton->callback_required );
-    
+
     delete baton;
     delete req;
 }
@@ -755,16 +745,17 @@ void StmtObject::Init( Isolate *isolate )
 /***************************************/
 {
     HandleScope	scope(isolate);
+	Local<Context> context = isolate->GetCurrentContext();
     // Prepare constructor template
     Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "StmtObject" ) );
+	tpl->SetClassName(GetUtf8String(isolate, "StmtObject"));
     tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
 
     // Prototype
     NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
     NODE_SET_PROTOTYPE_METHOD( tpl, "drop", drop );
     NODE_SET_PROTOTYPE_METHOD( tpl, "getMoreResults", getMoreResults );
-    constructor.Reset( isolate, tpl->GetFunction() );
+    constructor.Reset( isolate, tpl->GetFunction(context).ToLocalChecked() );
 }
 
 void StmtObject::New( const FunctionCallbackInfo<Value> &args )
@@ -779,9 +770,11 @@ void StmtObject::New( const FunctionCallbackInfo<Value> &args )
 void StmtObject::NewInstance( const FunctionCallbackInfo<Value> &args )
 /*********************************************************************/
 {
+	Isolate* isolate = Isolate::GetCurrent();
+	Local<Context> context = isolate->GetCurrentContext();
     Persistent<Object> obj;
     CreateNewInstance( args, obj );
-    args.GetReturnValue().Set( obj );
+    args.GetReturnValue().Set( obj.Get(isolate) );
 }
 
 void StmtObject::CreateNewInstance( const FunctionCallbackInfo<Value> &	args,
@@ -791,7 +784,7 @@ void StmtObject::CreateNewInstance( const FunctionCallbackInfo<Value> &	args,
     Isolate *isolate = args.GetIsolate();
     HandleScope	scope(isolate);
     const unsigned argc = 1;
-    Handle<Value> argv[argc] = { args[0] };
+	Local<Value> argv[argc] = { args[0] };
     Local<Function>cons = Local<Function>::New( isolate, constructor );
 #if NODE_MAJOR_VERSION >= 10
     Local<Context> env = isolate->GetCurrentContext();
@@ -829,15 +822,16 @@ void HashToString( Local<Object> obj, Persistent<String> &ret )
 {
     Isolate *isolate = Isolate::GetCurrent();
     HandleScope	scope(isolate);
-    Local<Array> props = obj->GetOwnPropertyNames();
-    int length = props->Length();
+	Local<Context> context = isolate->GetCurrentContext();
+    MaybeLocal<Array> props = obj->GetOwnPropertyNames(context);
+    int length = props.ToLocalChecked()->Length();
     std::string params = "";
     bool	first = true;
     for( int i = 0; i < length; i++ ) {
-	Local<String> key = props->Get(i).As<String>();
-	Local<String> val = obj->Get(key).As<String>();
-	String::Utf8Value key_utf8( key );
-	String::Utf8Value val_utf8( val );
+	Local<String> key = props.ToLocalChecked()->Get(context, i).ToLocalChecked().As<String>();
+	Local<String> val = obj->Get(context, key).ToLocalChecked().As<String>();
+	String::Utf8Value key_utf8( isolate, key );
+	String::Utf8Value val_utf8( isolate, val );
 	if( !first ) {
 	    params += ";";
 	}
@@ -846,7 +840,7 @@ void HashToString( Local<Object> obj, Persistent<String> &ret )
 	params += "=";
 	params += std::string(*val_utf8);
     }
-    ret.Reset( isolate, String::NewFromUtf8( isolate, params.c_str() ) );
+	ret.Reset(isolate, GetUtf8String(isolate, params.c_str()));
 }
 
 #if 0
@@ -899,6 +893,7 @@ Connection::Connection( const FunctionCallbackInfo<Value> &args )
 /***************************************************************/
 {
     Isolate *isolate = args.GetIsolate();
+	Local<Context> context = isolate->GetCurrentContext();
     HandleScope scope( isolate );
     uv_mutex_init(&conn_mutex);
     conn = NULL;
@@ -911,21 +906,21 @@ Connection::Connection( const FunctionCallbackInfo<Value> &args )
     if( args.Length() == 1 ) {
 	//CheckArgType( args[0] );
 	if( args[0]->IsString() ) {
-	    Local<String> str = args[0]->ToString();
-	    int string_len = str->Utf8Length();
+	    MaybeLocal<String> str = args[0]->ToString(context);
+	    int string_len = str.ToLocalChecked()->Utf8Length(isolate);
 	    char *buf = new char[string_len+1];
-	    str->WriteUtf8( buf );
-	    _arg.Reset( isolate, String::NewFromUtf8( isolate, buf ) );
+	    str.ToLocalChecked()->WriteUtf8(isolate, buf );
+	    _arg.Reset( isolate, GetUtf8String(isolate, buf));
 	    delete [] buf;
 	} else if( args[0]->IsObject() ) {
-	    HashToString( args[0]->ToObject(), _arg );
+		HashToString(args[0]->ToObject(context).ToLocalChecked(), _arg);
 	} else if( !args[0]->IsUndefined() && !args[0]->IsNull() ) {
 	    throwError( JS_ERR_INVALID_ARGUMENTS );
 	} else {
-	    _arg.Reset( isolate, String::NewFromUtf8( isolate, "" ) );
+	    _arg.Reset( isolate, GetUtf8String(isolate, ""));
 	}
     } else {
-	_arg.Reset( isolate, String::NewFromUtf8( isolate, "" ) );
+	_arg.Reset( isolate, GetUtf8String(isolate, ""));
     }
 }
 
@@ -944,7 +939,7 @@ Connection::~Connection()
 	conn = NULL;
 	openConnections--;
     }
-    
+
     cleanAPI();
 };
 
@@ -977,11 +972,12 @@ void Connection::Init( Isolate *isolate )
 /***************************************/
 {
     HandleScope scope( isolate );
+	Local<Context> context = isolate->GetCurrentContext();
     // Prepare constructor template
     Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "Connection" ) );
+    tpl->SetClassName(GetUtf8String(isolate, "Connection"));
     tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
-    
+
     // Prototype
     NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
     NODE_SET_PROTOTYPE_METHOD( tpl, "prepare", prepare );
@@ -992,7 +988,7 @@ void Connection::Init( Isolate *isolate )
     NODE_SET_PROTOTYPE_METHOD( tpl, "rollback", rollback );
     NODE_SET_PROTOTYPE_METHOD( tpl, "connected", connected );
 
-    constructor.Reset( isolate, tpl->GetFunction() );
+    constructor.Reset( isolate, tpl->GetFunction(context).ToLocalChecked() );
 }
 
 void Connection::New( const FunctionCallbackInfo<Value> &args )
@@ -1026,7 +1022,7 @@ void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
     Isolate *isolate = args.GetIsolate();
     HandleScope scope( isolate );
     const unsigned argc = 1;
-    Handle<Value> argv[argc] = { args[0] };
+	Local<Value> argv[argc] = { args[0] };
     Local<Function> cons = Local<Function>::New( isolate, constructor );
 #if NODE_MAJOR_VERSION >= 10
     Local<Context> env = isolate->GetCurrentContext();
@@ -1038,4 +1034,4 @@ void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
     args.GetReturnValue().Set( instance );
 }
 
-#endif // !v010
+#endif //NODE_MAJOR_VERSION >= 12

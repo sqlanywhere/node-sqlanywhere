@@ -132,16 +132,6 @@ void getErrorMsg( int code, std::string &str );
 void throwError( a_sqlany_connection *conn );   
 void throwError( int code );
 
-#if v010
-void callBack( std::string *		str, 
-	       Persistent<Function>	callback,
-	       Local<Value>		Result,
-	       bool			callback_required = true );
-void callBack( std::string *		str,
-	       Local<Value>		callback,
-	       Local<Value>		Result,
-	       bool			callback_required = true );
-#else
 void callBack( std::string *		str,
 	       Persistent<Function> &	callback,
 	       Local<Value> &		Result,
@@ -154,27 +144,19 @@ void callBack( std::string *		str,
 	       Persistent<Function> &	callback,
 	       Persistent<Value> &	Result,
 	       bool			callback_required = true );
-#endif
 
 bool getBindParameters( std::vector<ExecuteData *>		&execData
-			, Handle<Value>				arg
+			, Local<Value>				arg
 			, std::vector<a_sqlany_bind_param> 	&params
 			, unsigned				&num_rows
     );
 
-#if v010
-bool getResultSet( Local<Value> 			&Result   
-		 , int 					&rows_affected
-		 , std::vector<char *> 			&colNames
-		 , ExecuteData				*execData
-		 , std::vector<a_sqlany_data_type> 	&col_types );
-#else
+
 bool getResultSet( Persistent<Value> 			&Result   
 		 , int 					&rows_affected
 		 , std::vector<char *> 			&colNames
 		 , ExecuteData				*execData
 		 , std::vector<a_sqlany_data_type> 	&col_types );
-#endif
 
 bool fetchResultSet( a_sqlany_stmt 			*sqlany_stmt
 		   , int 				&rows_affected

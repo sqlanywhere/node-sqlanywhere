@@ -138,22 +138,14 @@ class Connection : public ObjectWrap
 {
   public:
     /// @internal
-#if v010
-    static void Init();
-#else
     static void Init( Isolate * );
-#endif
 
     /// @internal
     static NODE_API_FUNC( NewInstance );
 	
   private:
     /// @internal
-#if v010
-    Connection( const Arguments &args );
-#else
     Connection( const FunctionCallbackInfo<Value> &args );
-#endif
     /// @internal
     ~Connection();
 

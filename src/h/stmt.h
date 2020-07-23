@@ -16,20 +16,14 @@ class StmtObject : public node::ObjectWrap
 {
   public:
     /// @internal
-#if v010
-    static void Init();
-#else
     static void Init( Isolate * );
-#endif
     
     /// @internal
     static NODE_API_FUNC( NewInstance );
 
     /// @internal
-#if !v010
     static void CreateNewInstance( const FunctionCallbackInfo<Value> &args,
 				   Persistent<Object> &obj );
-#endif
 
     /// @internal
     StmtObject();
