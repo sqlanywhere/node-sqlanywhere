@@ -157,7 +157,8 @@ void callBack( std::string *		str,
 #endif
 
 bool getBindParameters( std::vector<ExecuteData *>		&execData
-			, Handle<Value>				arg
+            , Isolate *                 isolate
+			, Local<Value>				arg
 			, std::vector<a_sqlany_bind_param> 	&params
 			, unsigned				&num_rows
     );
@@ -204,7 +205,7 @@ void executeAfter( uv_work_t *req );
 void executeWork( uv_work_t *req );
 
 #if NODE_MAJOR_VERSION > 0 || NODE_MINOR_VERSION > 10
-void HashToString( Local<Object> obj, Persistent<String> &ret );
+void HashToString( Isolate *isolate, Local<Object> obj, Persistent<String> &ret );
 #else
 Persistent<String> HashToString( Local<Object> obj );
 Handle<Value> CreateConnection( const Arguments &args );

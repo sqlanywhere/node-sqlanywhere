@@ -194,15 +194,17 @@ void callBack( std::string *		str,
 }
 
 static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
-				   Handle<Value>			arg,
+                   Isolate *            isolate,
+				   Local<Value>			arg,
 				   std::vector<a_sqlany_bind_param> &	params,
 				   unsigned				&num_rows )
 /*********************************************************************************/
 {
-    Handle<Array>	rows = Handle<Array>::Cast( arg );
+    Local<Context>  context = isolate->GetCurrentContext();
+    Local<Array>	rows = Local<Array>::Cast( arg );
     num_rows = rows->Length();
 
-    Handle<Array>	row0 = Handle<Array>::Cast( rows->Get(0) );
+    Local<Array>	row0 = Local<Array>::Cast( rows->Get(0) );
     unsigned		num_cols = row0->Length();
     unsigned		c;
 
@@ -216,10 +218,10 @@ static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
     // Make sure that each array in the list has the same number and types
     // of values
     for( unsigned int r = 1; r < num_rows; r++ ) {
-	Handle<Array>	row = Handle<Array>::Cast( rows->Get(r) );
+	Local<Array>	row = Local<Array>::Cast( rows->Get(r) );
 	for( c = 0; c < num_cols; c++ ) {
-	    Handle<Value> val0 = row0->Get(c);
-	    Handle<Value> val = row->Get(c);
+	    Local<Value> val0 = row0->Get(c);
+	    Local<Value> val = row->Get(c);
 
 	    if( ( val0->IsInt32() || val0->IsNumber() ) &&
 		( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
@@ -276,14 +278,18 @@ static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
 	}
 
 	for( unsigned int r = 0; r < num_rows; r++ ) {
-	    Handle<Array>	bind_params = Handle<Array>::Cast( rows->Get(r) );
+	    Local<Array>	bind_params = Local<Array>::Cast( rows->Get(r) );
 	
 	    is_null[r] = false;
 	    if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
-		param_double[r] = bind_params->Get(c)->NumberValue();
+		param_double[r] = bind_params->Get(c)->NumberValue(context).FromJust();
 	
 	    } else if( bind_params->Get(c)->IsString() ) {
-		String::Utf8Value paramValue( bind_params->Get(c)->ToString() );
+#if NODE_MAJOR_VERSION >= 12
+		String::Utf8Value paramValue( isolate, (bind_params->Get(c)->ToString(context)).ToLocalChecked() );
+#else
+		String::Utf8Value paramValue( (bind_params->Get(c)->ToString(context)).ToLocalChecked() );
+#endif
 		const char* param_string = (*paramValue);
 		len[r] = (size_t)paramValue.length();
 		char *param_char = new char[len[r] + 1];
@@ -308,12 +314,14 @@ static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
 }
 
 bool getBindParameters( std::vector<ExecuteData *>		&execData,
-			Handle<Value> 				arg,
+            Isolate *                   isolate,
+			Local<Value> 				arg,
 			std::vector<a_sqlany_bind_param> &	params,
 			unsigned				&num_rows )
 /*************************************************************************/
 {
-    Handle<Array>		bind_params = Handle<Array>::Cast( arg );
+    Local<Context>      context = isolate->GetCurrentContext();
+    Local<Array>		bind_params = Local<Array>::Cast( arg );
 
     if( bind_params->Length() == 0 ) {
 	// if an empty array was passed in, we still need ExecuteData
@@ -323,7 +331,7 @@ bool getBindParameters( std::vector<ExecuteData *>		&execData,
     }
 
     if( bind_params->Get(0)->IsArray() ) {
-	return getWideBindParameters( execData, arg, params, num_rows );
+	return getWideBindParameters( execData, isolate, arg, params, num_rows );
     }
     num_rows = 1;
 
@@ -336,20 +344,24 @@ bool getBindParameters( std::vector<ExecuteData *>		&execData,
 
 	if( bind_params->Get(i)->IsInt32() ) {
 	    int *param_int = new int;
-	    *param_int = bind_params->Get(i)->Int32Value();
+	    *param_int = bind_params->Get(i)->Int32Value(context).FromJust();
 	    ex->addInt( param_int );
 	    param.value.buffer = (char *)( param_int );
 	    param.value.type   = A_VAL32;
 	    
 	} else if( bind_params->Get(i)->IsNumber() ) {
 	    double *param_double = new double;
-	    *param_double = bind_params->Get(i)->NumberValue(); // Remove Round off Error
+	    *param_double = bind_params->Get(i)->NumberValue(context).FromJust(); // Remove Round off Error
 	    ex->addNum( param_double );
 	    param.value.buffer = (char *)( param_double );
 	    param.value.type   = A_DOUBLE;
 	
 	} else if( bind_params->Get(i)->IsString() ) {
-	    String::Utf8Value paramValue( bind_params->Get(i)->ToString() );
+#if NODE_MAJOR_VERSION >= 12
+	    String::Utf8Value paramValue( isolate, (bind_params->Get(i)->ToString(context)).ToLocalChecked() );
+#else
+	    String::Utf8Value paramValue( (bind_params->Get(i)->ToString(context)).ToLocalChecked() );
+#endif
 	    const char* param_string = (*paramValue);
 	    size_t *len = new size_t;
 	    *len = (size_t)paramValue.length();
@@ -764,7 +776,8 @@ void StmtObject::Init( Isolate *isolate )
     NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
     NODE_SET_PROTOTYPE_METHOD( tpl, "drop", drop );
     NODE_SET_PROTOTYPE_METHOD( tpl, "getMoreResults", getMoreResults );
-    constructor.Reset( isolate, tpl->GetFunction() );
+    Local<Context> context = isolate->GetCurrentContext();
+    constructor.Reset( isolate, tpl->GetFunction( context ).ToLocalChecked() );
 }
 
 void StmtObject::New( const FunctionCallbackInfo<Value> &args )
@@ -791,7 +804,7 @@ void StmtObject::CreateNewInstance( const FunctionCallbackInfo<Value> &	args,
     Isolate *isolate = args.GetIsolate();
     HandleScope	scope(isolate);
     const unsigned argc = 1;
-    Handle<Value> argv[argc] = { args[0] };
+    Local<Value> argv[argc] = { args[0] };
     Local<Function>cons = Local<Function>::New( isolate, constructor );
 #if NODE_MAJOR_VERSION >= 10
     Local<Context> env = isolate->GetCurrentContext();
@@ -824,20 +837,25 @@ void StmtObject::removeConnection( void )
 
 // Connection Functions
 
-void HashToString( Local<Object> obj, Persistent<String> &ret )
+void HashToString( Isolate *isolate, Local<Object> obj, Persistent<String> &ret )
 /*************************************************************/
 {
-    Isolate *isolate = Isolate::GetCurrent();
+    Local<Context> context = isolate->GetCurrentContext();
     HandleScope	scope(isolate);
-    Local<Array> props = obj->GetOwnPropertyNames();
+    Local<Array> props = (obj->GetOwnPropertyNames(context)).ToLocalChecked();
     int length = props->Length();
     std::string params = "";
     bool	first = true;
     for( int i = 0; i < length; i++ ) {
 	Local<String> key = props->Get(i).As<String>();
 	Local<String> val = obj->Get(key).As<String>();
+#if NODE_MAJOR_VERSION >= 12
+	String::Utf8Value key_utf8( isolate, key );
+	String::Utf8Value val_utf8( isolate, val );
+#else
 	String::Utf8Value key_utf8( key );
 	String::Utf8Value val_utf8( val );
+#endif
 	if( !first ) {
 	    params += ";";
 	}
@@ -911,14 +929,20 @@ Connection::Connection( const FunctionCallbackInfo<Value> &args )
     if( args.Length() == 1 ) {
 	//CheckArgType( args[0] );
 	if( args[0]->IsString() ) {
-	    Local<String> str = args[0]->ToString();
+	    Local<String> str = args[0]->ToString(isolate);
+#if NODE_MAJOR_VERSION >= 12
+        int string_len = str->Utf8Length(isolate);
+        char *buf = new char[string_len + 1];
+        str->WriteUtf8(isolate, buf);
+#else
 	    int string_len = str->Utf8Length();
 	    char *buf = new char[string_len+1];
 	    str->WriteUtf8( buf );
+#endif
 	    _arg.Reset( isolate, String::NewFromUtf8( isolate, buf ) );
 	    delete [] buf;
 	} else if( args[0]->IsObject() ) {
-	    HashToString( args[0]->ToObject(), _arg );
+	    HashToString( isolate, args[0]->ToObject(isolate), _arg );
 	} else if( !args[0]->IsUndefined() && !args[0]->IsNull() ) {
 	    throwError( JS_ERR_INVALID_ARGUMENTS );
 	} else {
@@ -992,7 +1016,8 @@ void Connection::Init( Isolate *isolate )
     NODE_SET_PROTOTYPE_METHOD( tpl, "rollback", rollback );
     NODE_SET_PROTOTYPE_METHOD( tpl, "connected", connected );
 
-    constructor.Reset( isolate, tpl->GetFunction() );
+    Local<Context> context = isolate->GetCurrentContext();
+    constructor.Reset(isolate, tpl->GetFunction(context).ToLocalChecked());
 }
 
 void Connection::New( const FunctionCallbackInfo<Value> &args )
@@ -1026,7 +1051,7 @@ void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
     Isolate *isolate = args.GetIsolate();
     HandleScope scope( isolate );
     const unsigned argc = 1;
-    Handle<Value> argv[argc] = { args[0] };
+    Local<Value> argv[argc] = { args[0] };
     Local<Function> cons = Local<Function>::New( isolate, constructor );
 #if NODE_MAJOR_VERSION >= 10
     Local<Context> env = isolate->GetCurrentContext();
