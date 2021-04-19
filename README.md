@@ -1,5 +1,5 @@
 # node-sqlanywhere
-This is a Node.js driver written for [SAP SQL Anywhere](http://www.sap.com/pc/tech/database/software/sybase-sql-anywhere/index.html).
+This is a Node.js driver written for [SAP SQL Anywhere](https://www.sap.com/products/sql-anywhere.html).
 
 [![NPM](https://nodei.co/npm/sqlanywhere.png?compact=true)](https://nodei.co/npm/sqlanywhere/)
 
@@ -22,7 +22,8 @@ Versions supported:
 <tr><td>1.0.19</td><td>8.x</td></tr>
 <tr><td>1.0.22</td><td>9.x</td></tr>
 <tr><td>1.0.23</td><td>10.x</td></tr>
-<tr><td>1.0.24</th><td><b>Only</b> 5.x through 10.x (support for 0.10, 0.12, and 4.x is dropped)</td></tr>
+<tr><td>1.0.24<td><b>Only</b> 5.x through 10.x (support for 0.10, 0.12, and 4.x is dropped)</td></tr>
+<tr><td>1.0.25<td>5.x through 12.x</td></tr>
 </table>
 
 ## Getting Started
