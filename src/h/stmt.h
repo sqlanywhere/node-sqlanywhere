@@ -14,38 +14,32 @@ using namespace v8;
  */
 class StmtObject : public node::ObjectWrap
 {
-  public:
-    /// @internal
-#if v010
-    static void Init();
-#else
-    static void Init( Isolate * );
-#endif
-    
-    /// @internal
-    static NODE_API_FUNC( NewInstance );
+public:
+  /// @internal
+  static void Init(Isolate *);
 
-    /// @internal
-#if !v010
-    static void CreateNewInstance( const FunctionCallbackInfo<Value> &args,
-				   Persistent<Object> &obj );
-#endif
+  /// @internal
+  static NODE_API_FUNC(NewInstance);
 
-    /// @internal
-    StmtObject();
-    /// @internal
-    ~StmtObject();
-    /// @internal
-    void cleanup( void );
-    void removeConnection( void );
+  /// @internal
+  static void CreateNewInstance(const FunctionCallbackInfo<Value> &args,
+                                Persistent<Object> &obj);
 
-  private:
-    /// @internal
-    static Persistent<Function> constructor;
-    /// @internal
-    static NODE_API_FUNC( New );
-	
-    /** Executes the prepared SQL statement.
+  /// @internal
+  StmtObject();
+  /// @internal
+  ~StmtObject();
+  /// @internal
+  void cleanup(void);
+  void removeConnection(void);
+
+private:
+  /// @internal
+  static Persistent<Function> constructor;
+  /// @internal
+  static NODE_API_FUNC(New);
+
+  /** Executes the prepared SQL statement.
      *
      * This method optionally takes in an array of bind
      * parameters to execute.
@@ -89,9 +83,9 @@ class StmtObject : public node::ObjectWrap
      * @return If no callback is specified, the result is returned.
      *
      */
-    static NODE_API_FUNC( exec );
-    
-    /** Drops the statement.
+  static NODE_API_FUNC(exec);
+
+  /** Drops the statement.
      *
      * This method drops the prepared statement and frees up resources.
      *
@@ -125,14 +119,14 @@ class StmtObject : public node::ObjectWrap
      * @param callback The optional callback function.
      *
      */
-    static NODE_API_FUNC( drop );
+  static NODE_API_FUNC(drop);
 
-    /// @internal
-    static void dropAfter( uv_work_t *req );
-    /// @internal
-    static void dropWork( uv_work_t *req );
+  /// @internal
+  static void dropAfter(uv_work_t *req);
+  /// @internal
+  static void dropWork(uv_work_t *req);
 
-    /** Gets the next result set of a multi-result-set query.
+  /** Gets the next result set of a multi-result-set query.
      *
      * This method can be either synchronous or asynchronous depending on
      * whether or not a callback function is specified.
@@ -166,11 +160,11 @@ class StmtObject : public node::ObjectWrap
      * @param callback The optional callback function.
      *
      */
-    static NODE_API_FUNC( getMoreResults );
+  static NODE_API_FUNC(getMoreResults);
 
-  public:
-    /// @internal
-    Connection		*connection;
-    /// @internal
-    a_sqlany_stmt	*sqlany_stmt;
+public:
+  /// @internal
+  Connection *connection;
+  /// @internal
+  a_sqlany_stmt *sqlany_stmt;
 };
