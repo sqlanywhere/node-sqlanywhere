@@ -136,24 +136,16 @@ using namespace node;
  */
 class Connection : public ObjectWrap
 {
-  public:
+public:
     /// @internal
-#if v010
-    static void Init();
-#else
-    static void Init( Isolate * );
-#endif
+    static void Init(Isolate *);
 
     /// @internal
-    static NODE_API_FUNC( NewInstance );
-	
-  private:
+    static NODE_API_FUNC(NewInstance);
+
+private:
     /// @internal
-#if v010
-    Connection( const Arguments &args );
-#else
-    Connection( const FunctionCallbackInfo<Value> &args );
-#endif
+    Connection(const FunctionCallbackInfo<Value> &args);
     /// @internal
     ~Connection();
 
@@ -161,13 +153,13 @@ class Connection : public ObjectWrap
     static Persistent<Function> constructor;
 
     /// @internal
-    static void noParamAfter( uv_work_t *req );
+    static void noParamAfter(uv_work_t *req);
     /// @internal
-    static void connectAfter( uv_work_t *req );
+    static void connectAfter(uv_work_t *req);
     /// @internal
-    static void connectWork( uv_work_t *req );
+    static void connectWork(uv_work_t *req);
     /// @internal
-    static NODE_API_FUNC( New );
+    static NODE_API_FUNC(New);
 
     /// Connect using an existing connection.
     //
@@ -202,7 +194,7 @@ class Connection : public ObjectWrap
     //
     // @internal
     ///
-    
+
     /** Creates a new connection.
      *
      * This method creates a new connection using either a connection string
@@ -242,7 +234,7 @@ class Connection : public ObjectWrap
      *
      * @see Connection::disconnect
      */
-    static NODE_API_FUNC( connect );
+    static NODE_API_FUNC(connect);
 
     /** Closes the current connection.
      *
@@ -275,11 +267,11 @@ class Connection : public ObjectWrap
      *
      * @see Connection::connect
      */
-    static NODE_API_FUNC( disconnect );
-    
+    static NODE_API_FUNC(disconnect);
+
     /// @internal
-    static void disconnectWork( uv_work_t *req );
-	
+    static void disconnectWork(uv_work_t *req);
+
     /** Executes the specified SQL statement.
      *
      * This method takes in a SQL statement and an optional array of bind
@@ -335,8 +327,8 @@ class Connection : public ObjectWrap
      * @return If no callback is specified, the result is returned.
      *
      */
-    static NODE_API_FUNC( exec );
-	
+    static NODE_API_FUNC(exec);
+
     /** Prepares the specified SQL statement.
      *
      * This method prepares a SQL statement and returns a Statement object
@@ -373,13 +365,13 @@ class Connection : public ObjectWrap
      * @return If no callback is specified, a Statement object is returned.
      *
      */
-    static NODE_API_FUNC( prepare );
-	
+    static NODE_API_FUNC(prepare);
+
     /// @internal
-    static void prepareAfter( uv_work_t *req );
+    static void prepareAfter(uv_work_t *req);
     /// @internal
-    static void prepareWork( uv_work_t *req );
-    
+    static void prepareWork(uv_work_t *req);
+
     /** Performs a commit on the connection.
      *
      * This method performs a commit on the connection.
@@ -421,11 +413,11 @@ class Connection : public ObjectWrap
      * @param callback The optional callback function. ( type: Function )
      *
      */
-    static NODE_API_FUNC( commit );
+    static NODE_API_FUNC(commit);
 
     /// @internal
-    static void commitWork( uv_work_t *req );
-	
+    static void commitWork(uv_work_t *req);
+
     /** Performs a rollback on the connection.
      *
      * This method performs a rollback on the connection.
@@ -465,10 +457,10 @@ class Connection : public ObjectWrap
      * @param callback The optional callback function. ( type: Function )
      *
      */
-    static NODE_API_FUNC( rollback );
+    static NODE_API_FUNC(rollback);
 
     /// @internal
-    static void rollbackWork( uv_work_t *req );
+    static void rollbackWork(uv_work_t *req);
 
     /** Indicates whether the connection is connected.
      *
@@ -492,24 +484,24 @@ class Connection : public ObjectWrap
      * @return true if the connection is connected, false if not.
      *
      */
-    static NODE_API_FUNC( connected );
+    static NODE_API_FUNC(connected);
 
-  public:
+public:
     /// @internal
-    a_sqlany_connection	*conn;
+    a_sqlany_connection *conn;
     /// @internal
-    unsigned int	max_api_ver;
+    unsigned int max_api_ver;
     /// @internal
-    bool 		sqlca_connection;
+    bool sqlca_connection;
     /// @internal
-    uv_mutex_t 		conn_mutex;
+    uv_mutex_t conn_mutex;
     /// @internal
-    Persistent<String>	_arg;
+    Persistent<String> _arg;
     /// @internal
-    std::vector<void*>	statements;
+    std::vector<void *> statements;
 
     /// @internal
-    void removeStmt( class StmtObject *stmt );
+    void removeStmt(class StmtObject *stmt);
     /// @internal
-    void cleanupStmts( void );
+    void cleanupStmts(void);
 };

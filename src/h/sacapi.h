@@ -21,7 +21,7 @@
 //
 // ***************************************************************************
 
-#ifndef SACAPI_H 
+#ifndef SACAPI_H
 #define SACAPI_H
 
 /** \mainpage SQL Anywhere C API
@@ -85,122 +85,123 @@
  *
  * You must define _SACAPI_VERSION as 1 or higher for this functionality.
  */
-#define SQLANY_API_VERSION_1		1
+#define SQLANY_API_VERSION_1 1
 
 /** Version 2 introduced the "_ex" functions and the ability to cancel requests.
  *
  * You must define _SACAPI_VERSION as 2 or higher for this functionality.
  */
-#define SQLANY_API_VERSION_2		2
+#define SQLANY_API_VERSION_2 2
 
 /** Version 3 introduced the "callback" function.
  *
  * You must define _SACAPI_VERSION as 3 or higher for this functionality.
  */
-#define SQLANY_API_VERSION_3		3
+#define SQLANY_API_VERSION_3 3
 
 /** Version 4 introduced NCHAR support and wide inserts.
  *
  * You must define _SACAPI_VERSION as 4 or higher for this functionality.
  */
-#define SQLANY_API_VERSION_4		4
+#define SQLANY_API_VERSION_4 4
 
 /** Version 5 introduced a way to reset sent data through sqlany_send_param_data()
  * and the A_FLOAT data type
  *
  * You must define _SACAPI_VERSION as 5 or higher for this functionality.
  */
-#define SQLANY_API_VERSION_5		5
+#define SQLANY_API_VERSION_5 5
 
 /** If the command line does not specify which version to build, 
  * then build the latest version. 
  */
 #ifndef _SACAPI_VERSION
-#define _SACAPI_VERSION	SQLANY_API_VERSION_5
+#define _SACAPI_VERSION SQLANY_API_VERSION_5
 #endif
 
 /** Returns the minimal error buffer size.
  */
-#define SACAPI_ERROR_SIZE		256
+#define SACAPI_ERROR_SIZE 256
 
 #if defined(__cplusplus)
-extern "C" {
+extern "C"
+{
 #endif
 
-/** A handle to an interface context
+    /** A handle to an interface context
  */
-typedef struct a_sqlany_interface_context a_sqlany_interface_context;
+    typedef struct a_sqlany_interface_context a_sqlany_interface_context;
 
-/** A handle to a connection object
+    /** A handle to a connection object
  */
-typedef struct a_sqlany_connection a_sqlany_connection;
+    typedef struct a_sqlany_connection a_sqlany_connection;
 
-/** A handle to a statement object
+    /** A handle to a statement object
  */
-typedef struct a_sqlany_stmt	   a_sqlany_stmt;
+    typedef struct a_sqlany_stmt a_sqlany_stmt;
 
-/** A portable 32-bit signed value */
-typedef signed int   	sacapi_i32;
-/** A portable 32-bit unsigned value */
-typedef unsigned int 	sacapi_u32;
-/** A portable boolean value */
-typedef sacapi_i32 	sacapi_bool;
+    /** A portable 32-bit signed value */
+    typedef signed int sacapi_i32;
+    /** A portable 32-bit unsigned value */
+    typedef unsigned int sacapi_u32;
+    /** A portable boolean value */
+    typedef sacapi_i32 sacapi_bool;
 
 // TODO:Character set issues
 
 /** The run-time calling convention in use (Windows only).
  */
 #ifdef _WIN32
-    #define _sacapi_entry_	    __stdcall
+#define _sacapi_entry_ __stdcall
 #endif
 #ifndef _sacapi_entry_
-    #define _sacapi_entry_
+#define _sacapi_entry_
 #endif
 
 /** Callback function type
  */
-#define SQLANY_CALLBACK	    _sacapi_entry_
+#define SQLANY_CALLBACK _sacapi_entry_
 
-/** Parameter type for sqlany_register_callback function used to specify the address of the callback routine.
+    /** Parameter type for sqlany_register_callback function used to specify the address of the callback routine.
  */
-typedef int (SQLANY_CALLBACK *SQLANY_CALLBACK_PARM)();
+    typedef int(SQLANY_CALLBACK *SQLANY_CALLBACK_PARM)();
 
-/** Specifies the data type being passed in or retrieved.
+    /** Specifies the data type being passed in or retrieved.
  */
-typedef enum a_sqlany_data_type
-{
-    /// Invalid data type.
-    A_INVALID_TYPE,
-    /// Binary data.  Binary data is treated as-is and no character set conversion is performed.
-    A_BINARY,
-    /// String data.  The data where character set conversion is performed.
-    A_STRING,
-    /// Double data.  Includes float values.
-    A_DOUBLE,
-    /// 64-bit integer.
-    A_VAL64,
-    /// 64-bit unsigned integer.
-    A_UVAL64,
-    /// 32-bit integer.
-    A_VAL32,
-    /// 32-bit unsigned integer.
-    A_UVAL32,
-    /// 16-bit integer.
-    A_VAL16,
-    /// 16-bit unsigned integer.
-    A_UVAL16,
-    /// 8-bit integer.
-    A_VAL8,
-    /// 8-bit unsigned integer.
-    A_UVAL8
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
-    ,
-    //// Float precision data.
-    A_FLOAT
+    typedef enum a_sqlany_data_type
+    {
+        /// Invalid data type.
+        A_INVALID_TYPE,
+        /// Binary data.  Binary data is treated as-is and no character set conversion is performed.
+        A_BINARY,
+        /// String data.  The data where character set conversion is performed.
+        A_STRING,
+        /// Double data.  Includes float values.
+        A_DOUBLE,
+        /// 64-bit integer.
+        A_VAL64,
+        /// 64-bit unsigned integer.
+        A_UVAL64,
+        /// 32-bit integer.
+        A_VAL32,
+        /// 32-bit unsigned integer.
+        A_UVAL32,
+        /// 16-bit integer.
+        A_VAL16,
+        /// 16-bit unsigned integer.
+        A_UVAL16,
+        /// 8-bit integer.
+        A_VAL8,
+        /// 8-bit unsigned integer.
+        A_UVAL8
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_5
+        ,
+        //// Float precision data.
+        A_FLOAT
 #endif
-} a_sqlany_data_type;
+    } a_sqlany_data_type;
 
-/** Returns a description of the attributes of a data value.
+    /** Returns a description of the attributes of a data value.
  *
  * To view examples of the a_sqlany_data_value structure in use,
  * see any of the following sample files in the <dfn>sdk\\dbcapi\\examples</dfn> directory
@@ -213,39 +214,39 @@ typedef enum a_sqlany_data_type
  * <li>preparing_statements.cpp
  * </ul>
  */
-typedef struct a_sqlany_data_value
-{
-    /// A pointer to user supplied buffer of data.
-    char * 		buffer;
-    /// The size of the buffer.
-    size_t		buffer_size;
-    /// A pointer to the number of valid bytes in the buffer.  This value must be less than buffer_size.
-    size_t *		length;
-    /// The type of the data
-    a_sqlany_data_type	type;
-    /// A pointer to indicate whether the last fetched data is NULL.
-    sacapi_bool *	is_null;
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
-    /// Indicates whether the buffer value is an pointer to the actual value.
-    sacapi_bool		is_address;
+    typedef struct a_sqlany_data_value
+    {
+        /// A pointer to user supplied buffer of data.
+        char *buffer;
+        /// The size of the buffer.
+        size_t buffer_size;
+        /// A pointer to the number of valid bytes in the buffer.  This value must be less than buffer_size.
+        size_t *length;
+        /// The type of the data
+        a_sqlany_data_type type;
+        /// A pointer to indicate whether the last fetched data is NULL.
+        sacapi_bool *is_null;
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_4
+        /// Indicates whether the buffer value is an pointer to the actual value.
+        sacapi_bool is_address;
 #endif
-} a_sqlany_data_value;
+    } a_sqlany_data_value;
 
-/** A data direction enumeration.
+    /** A data direction enumeration.
  */
-typedef enum a_sqlany_data_direction
-{
-    /// Invalid data direction.
-    DD_INVALID       = 0x0,
-    /// Input-only host variables.
-    DD_INPUT         = 0x1,
-    /// Output-only host variables.
-    DD_OUTPUT        = 0x2,
-    /// Input and output host variables.
-    DD_INPUT_OUTPUT  = 0x3
-} a_sqlany_data_direction;
+    typedef enum a_sqlany_data_direction
+    {
+        /// Invalid data direction.
+        DD_INVALID = 0x0,
+        /// Input-only host variables.
+        DD_INPUT = 0x1,
+        /// Output-only host variables.
+        DD_OUTPUT = 0x2,
+        /// Input and output host variables.
+        DD_INPUT_OUTPUT = 0x3
+    } a_sqlany_data_direction;
 
-/** A bind parameter structure used to bind parameter and prepared statements.
+    /** A bind parameter structure used to bind parameter and prepared statements.
  *
  * To view examples of the a_sqlany_bind_param structure in use,
  * see any of the following sample files in the <dfn>sdk\\dbcapi\\examples</dfn> directory
@@ -258,78 +259,78 @@ typedef enum a_sqlany_data_direction
  * </ul>
  * \sa sqlany_execute()
  */
-typedef struct a_sqlany_bind_param
-{
-    /// The direction of the data. (input, output, input_output)
-    a_sqlany_data_direction	direction;
-    /// The actual value of the data.
-    a_sqlany_data_value		value;
-    /// Name of the bind parameter. This is only used by sqlany_describe_bind_param().
-    char			*name;
-} a_sqlany_bind_param;
+    typedef struct a_sqlany_bind_param
+    {
+        /// The direction of the data. (input, output, input_output)
+        a_sqlany_data_direction direction;
+        /// The actual value of the data.
+        a_sqlany_data_value value;
+        /// Name of the bind parameter. This is only used by sqlany_describe_bind_param().
+        char *name;
+    } a_sqlany_bind_param;
 
-/** An enumeration of the native types of values as described by the server.
+    /** An enumeration of the native types of values as described by the server.
  *
  * The value types correspond to the embedded SQL data types.
  *
  * \hideinitializers
  * \sa sqlany_get_column_info(), a_sqlany_column_info
  */
-typedef enum a_sqlany_native_type
-{
-    /// No data type.
-    DT_NOTYPE       	= 0,
-    /// Null-terminated character string that is a valid date. 
-    DT_DATE         	= 384,
-    /// Null-terminated character string that is a valid time. 
-    DT_TIME         	= 388,
-    /// Null-terminated character string that is a valid timestamp.
-    DT_TIMESTAMP    	= 392,
-    /// Varying length character string, in the CHAR character set, with a two-byte length field. The maximum length is 32765 bytes. When sending data, you must set the length field. When fetching data, the database server sets the length field. The data is not null-terminated or blank-padded.
-    DT_VARCHAR      	= 448,
-    /// Fixed-length blank-padded character string, in the CHAR character set. The maximum length, specified in bytes, is 32767. The data is not null-terminated. 
-    DT_FIXCHAR      	= 452,
-    /// Long varying length character string, in the CHAR character set.
-    DT_LONGVARCHAR  	= 456,
-    /// Null-terminated character string, in the CHAR character set. The string is blank-padded if the database is initialized with blank-padded strings.
-    DT_STRING       	= 460,
-    /// 8-byte floating-point number. 
-    DT_DOUBLE       	= 480,
-    /// 4-byte floating-point number.
-    DT_FLOAT        	= 482,
-    /// Packed decimal number (proprietary format). 
-    DT_DECIMAL      	= 484,
-    /// 32-bit signed integer.
-    DT_INT          	= 496,
-    /// 16-bit signed integer.
-    DT_SMALLINT     	= 500,
-    /// Varying length binary data with a two-byte length field. The maximum length is 32765 bytes. When supplying information to the database server, you must set the length field. When fetching information from the database server, the server sets the length field. 
-    DT_BINARY       	= 524,
-    /// Long binary data.
-    DT_LONGBINARY   	= 528,
-    /// 8-bit signed integer.
-    DT_TINYINT      	= 604,
-    /// 64-bit signed integer.
-    DT_BIGINT       	= 608,
-    /// 32-bit unsigned integer.
-    DT_UNSINT       	= 612,
-    /// 16-bit unsigned integer.
-    DT_UNSSMALLINT  	= 616,
-    /// 64-bit unsigned integer.
-    DT_UNSBIGINT    	= 620,
-    /// 8-bit signed integer.
-    DT_BIT          	= 624,
-    /// Null-terminated character string, in the NCHAR character set. The string is blank-padded if the database is initialized with blank-padded strings.
-    DT_NSTRING      	= 628,
-    /// Fixed-length blank-padded character string, in the NCHAR character set. The maximum length, specified in bytes, is 32767. The data is not null-terminated. 
-    DT_NFIXCHAR     	= 632,
-    /// Varying length character string, in the NCHAR character set, with a two-byte length field. The maximum length is 32765 bytes. When sending data, you must set the length field. When fetching data, the database server sets the length field. The data is not null-terminated or blank-padded.
-    DT_NVARCHAR     	= 636,
-    /// Long varying length character string, in the NCHAR character set.
-    DT_LONGNVARCHAR 	= 640
-} a_sqlany_native_type;
+    typedef enum a_sqlany_native_type
+    {
+        /// No data type.
+        DT_NOTYPE = 0,
+        /// Null-terminated character string that is a valid date.
+        DT_DATE = 384,
+        /// Null-terminated character string that is a valid time.
+        DT_TIME = 388,
+        /// Null-terminated character string that is a valid timestamp.
+        DT_TIMESTAMP = 392,
+        /// Varying length character string, in the CHAR character set, with a two-byte length field. The maximum length is 32765 bytes. When sending data, you must set the length field. When fetching data, the database server sets the length field. The data is not null-terminated or blank-padded.
+        DT_VARCHAR = 448,
+        /// Fixed-length blank-padded character string, in the CHAR character set. The maximum length, specified in bytes, is 32767. The data is not null-terminated.
+        DT_FIXCHAR = 452,
+        /// Long varying length character string, in the CHAR character set.
+        DT_LONGVARCHAR = 456,
+        /// Null-terminated character string, in the CHAR character set. The string is blank-padded if the database is initialized with blank-padded strings.
+        DT_STRING = 460,
+        /// 8-byte floating-point number.
+        DT_DOUBLE = 480,
+        /// 4-byte floating-point number.
+        DT_FLOAT = 482,
+        /// Packed decimal number (proprietary format).
+        DT_DECIMAL = 484,
+        /// 32-bit signed integer.
+        DT_INT = 496,
+        /// 16-bit signed integer.
+        DT_SMALLINT = 500,
+        /// Varying length binary data with a two-byte length field. The maximum length is 32765 bytes. When supplying information to the database server, you must set the length field. When fetching information from the database server, the server sets the length field.
+        DT_BINARY = 524,
+        /// Long binary data.
+        DT_LONGBINARY = 528,
+        /// 8-bit signed integer.
+        DT_TINYINT = 604,
+        /// 64-bit signed integer.
+        DT_BIGINT = 608,
+        /// 32-bit unsigned integer.
+        DT_UNSINT = 612,
+        /// 16-bit unsigned integer.
+        DT_UNSSMALLINT = 616,
+        /// 64-bit unsigned integer.
+        DT_UNSBIGINT = 620,
+        /// 8-bit signed integer.
+        DT_BIT = 624,
+        /// Null-terminated character string, in the NCHAR character set. The string is blank-padded if the database is initialized with blank-padded strings.
+        DT_NSTRING = 628,
+        /// Fixed-length blank-padded character string, in the NCHAR character set. The maximum length, specified in bytes, is 32767. The data is not null-terminated.
+        DT_NFIXCHAR = 632,
+        /// Varying length character string, in the NCHAR character set, with a two-byte length field. The maximum length is 32765 bytes. When sending data, you must set the length field. When fetching data, the database server sets the length field. The data is not null-terminated or blank-padded.
+        DT_NVARCHAR = 636,
+        /// Long varying length character string, in the NCHAR character set.
+        DT_LONGNVARCHAR = 640
+    } a_sqlany_native_type;
 
-/** Returns column metadata information.
+    /** Returns column metadata information.
  *
  * sqlany_get_column_info() can be used to populate this structure.
  *
@@ -341,38 +342,38 @@ typedef enum a_sqlany_native_type
  * <li>dbcapi_isql.cpp
  * </ul>
  */
-typedef struct a_sqlany_column_info
-{
-    /// The name of the column (null-terminated).
-    /// The string can be referenced as long as the result set object is not freed.
-    char *			name;
-    /// The column data type.
-    a_sqlany_data_type		type;
-    /// The native type of the column in the database.
-    a_sqlany_native_type	native_type;
-    /// The precision.
-    unsigned short		precision;
-    /// The scale.
-    unsigned short		scale;
-    /// The maximum size a data value in this column can take.
-    size_t 			max_size;
-    /// Indicates whether a value in the column can be null.
-    sacapi_bool			nullable;
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
-    /// The name of the table (null-terminated).
-    /// The string can be referenced as long as the result set object is not freed.
-    char *			table_name; 
-    /// The name of the owner (null-terminated).
-    /// The string can be referenced as long as the result set object is not freed.
-    char *			owner_name; 
-    /// Indicates whether the column is bound to a user buffer.
-    sacapi_bool			is_bound;
-    /// Information about the bound column.
-    a_sqlany_data_value		binding;
+    typedef struct a_sqlany_column_info
+    {
+        /// The name of the column (null-terminated).
+        /// The string can be referenced as long as the result set object is not freed.
+        char *name;
+        /// The column data type.
+        a_sqlany_data_type type;
+        /// The native type of the column in the database.
+        a_sqlany_native_type native_type;
+        /// The precision.
+        unsigned short precision;
+        /// The scale.
+        unsigned short scale;
+        /// The maximum size a data value in this column can take.
+        size_t max_size;
+        /// Indicates whether a value in the column can be null.
+        sacapi_bool nullable;
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_4
+        /// The name of the table (null-terminated).
+        /// The string can be referenced as long as the result set object is not freed.
+        char *table_name;
+        /// The name of the owner (null-terminated).
+        /// The string can be referenced as long as the result set object is not freed.
+        char *owner_name;
+        /// Indicates whether the column is bound to a user buffer.
+        sacapi_bool is_bound;
+        /// Information about the bound column.
+        a_sqlany_data_value binding;
 #endif
-} a_sqlany_column_info;
+    } a_sqlany_column_info;
 
-/** Gets information about the currently bound parameters.
+    /** Gets information about the currently bound parameters.
  *
  * sqlany_get_bind_param_info() can be used to populate this structure.
  *
@@ -387,30 +388,30 @@ typedef struct a_sqlany_column_info
  * </ul>
  * \sa sqlany_execute()
  */
-typedef struct a_sqlany_bind_param_info
-{
-    /// A pointer to the name of the parameter.
-    char *		    	name;
-    /// The direction of the parameter.
-    a_sqlany_data_direction 	direction;
-    /// Information about the bound input value.
-    a_sqlany_data_value		input_value;
-    /// Information about the bound output value.
-    a_sqlany_data_value		output_value;
-    
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
-    /// The native type of the column in the database.
-    a_sqlany_native_type	native_type;
-    /// The precision.
-    unsigned short		precision;
-    /// The scale.
-    unsigned short		scale;
-    /// The maximum size a data value in this column can take.
-    size_t 			max_size;    
-#endif
-} a_sqlany_bind_param_info;
+    typedef struct a_sqlany_bind_param_info
+    {
+        /// A pointer to the name of the parameter.
+        char *name;
+        /// The direction of the parameter.
+        a_sqlany_data_direction direction;
+        /// Information about the bound input value.
+        a_sqlany_data_value input_value;
+        /// Information about the bound output value.
+        a_sqlany_data_value output_value;
 
-/** Returns metadata information about a column value in a result set.
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_4
+        /// The native type of the column in the database.
+        a_sqlany_native_type native_type;
+        /// The precision.
+        unsigned short precision;
+        /// The scale.
+        unsigned short scale;
+        /// The maximum size a data value in this column can take.
+        size_t max_size;
+#endif
+    } a_sqlany_bind_param_info;
+
+    /** Returns metadata information about a column value in a result set.
  *
  * sqlany_get_data_info() can be used
  * to populate this structure with information about what was last retrieved by a fetch operation.
@@ -424,74 +425,76 @@ typedef struct a_sqlany_bind_param_info
  * </ul>
  * \sa sqlany_get_data_info()
  */
-typedef struct a_sqlany_data_info
-{
-    /// The type of the data in the column.
-    a_sqlany_data_type	type;
-    /// Indicates whether the last fetched data is NULL.
-    /// This field is only valid after a successful fetch operation.
-    sacapi_bool		is_null;
-    /// The total number of bytes available to be fetched.
-    /// This field is only valid after a successful fetch operation.
-    size_t 		data_size;
-} a_sqlany_data_info;
+    typedef struct a_sqlany_data_info
+    {
+        /// The type of the data in the column.
+        a_sqlany_data_type type;
+        /// Indicates whether the last fetched data is NULL.
+        /// This field is only valid after a successful fetch operation.
+        sacapi_bool is_null;
+        /// The total number of bytes available to be fetched.
+        /// This field is only valid after a successful fetch operation.
+        size_t data_size;
+    } a_sqlany_data_info;
 
-/** An enumeration of the callback types.
+    /** An enumeration of the callback types.
  *
  * The callback types correspond to the embedded SQL callback types.
  *
  * \hideinitializers
  * \sa sqlany_register_callback()
  */
-typedef enum a_sqlany_callback_type {
-    /// This function is called just before a database request is sent to the server.
-    /// CALLBACK_START is used only on Windows operating systems.
-    CALLBACK_START = 0,
-    /// This function is called repeatedly by the interface library while the database server or client library is busy processing your database request. 
-    CALLBACK_WAIT,
-    /// This function is called after the response to a database request has been received by the DBLIB interface DLL.
-    /// CALLBACK_FINISH is used only on Windows operating systems. 
-    CALLBACK_FINISH,
-    /// This function is called when messages are received from the server during the processing of a request.
-    /// Messages can be sent to the client application from the database server using the SQL MESSAGE statement.
-    /// Messages can also be generated by long running database server statements. 
-    CALLBACK_MESSAGE = 7,
-    /// This function is called when the database server is about to drop a connection because of a liveness timeout,
-    /// through a DROP CONNECTION statement, or because the database server is being shut down.
-    /// The connection name conn_name is passed in to allow you to distinguish between connections.
-    /// If the connection was not named, it has a value of NULL.
-    CALLBACK_CONN_DROPPED,
-    /// This function is called once for each debug message and is passed a null-terminated string containing the text of the debug message.
-    /// A debug message is a message that is logged to the LogFile file. In order for a debug message to be passed to this callback, the LogFile
-    /// connection parameter must be used. The string normally has a newline character (\n) immediately before the terminating null character. 
-    CALLBACK_DEBUG_MESSAGE,
-    /// This function is called when a file transfer requires validation.
-    /// If the client data transfer is being requested during the execution of indirect statements such as from within a stored procedure,
-    /// the client library will not allow a transfer unless the client application has registered a validation callback and the response from
-    /// the callback indicates that the transfer may take place.
-    CALLBACK_VALIDATE_FILE_TRANSFER
-} a_sqlany_callback_type;
+    typedef enum a_sqlany_callback_type
+    {
+        /// This function is called just before a database request is sent to the server.
+        /// CALLBACK_START is used only on Windows operating systems.
+        CALLBACK_START = 0,
+        /// This function is called repeatedly by the interface library while the database server or client library is busy processing your database request.
+        CALLBACK_WAIT,
+        /// This function is called after the response to a database request has been received by the DBLIB interface DLL.
+        /// CALLBACK_FINISH is used only on Windows operating systems.
+        CALLBACK_FINISH,
+        /// This function is called when messages are received from the server during the processing of a request.
+        /// Messages can be sent to the client application from the database server using the SQL MESSAGE statement.
+        /// Messages can also be generated by long running database server statements.
+        CALLBACK_MESSAGE = 7,
+        /// This function is called when the database server is about to drop a connection because of a liveness timeout,
+        /// through a DROP CONNECTION statement, or because the database server is being shut down.
+        /// The connection name conn_name is passed in to allow you to distinguish between connections.
+        /// If the connection was not named, it has a value of NULL.
+        CALLBACK_CONN_DROPPED,
+        /// This function is called once for each debug message and is passed a null-terminated string containing the text of the debug message.
+        /// A debug message is a message that is logged to the LogFile file. In order for a debug message to be passed to this callback, the LogFile
+        /// connection parameter must be used. The string normally has a newline character (\n) immediately before the terminating null character.
+        CALLBACK_DEBUG_MESSAGE,
+        /// This function is called when a file transfer requires validation.
+        /// If the client data transfer is being requested during the execution of indirect statements such as from within a stored procedure,
+        /// the client library will not allow a transfer unless the client application has registered a validation callback and the response from
+        /// the callback indicates that the transfer may take place.
+        CALLBACK_VALIDATE_FILE_TRANSFER
+    } a_sqlany_callback_type;
 
-/** An enumeration of the message types for the MESSAGE callback.
+    /** An enumeration of the message types for the MESSAGE callback.
  *
  * \hideinitializers
  * \sa sqlany_register_callback()
  */
-typedef enum a_sqlany_message_type {
-    /// The message type was INFO.
-    MESSAGE_TYPE_INFO = 0,
-    /// The message type was WARNING.
-    MESSAGE_TYPE_WARNING,
-    /// The message type was ACTION.
-    MESSAGE_TYPE_ACTION,
-    /// The message type was STATUS.
-    MESSAGE_TYPE_STATUS,
-    /// The message type was PROGRESS.
-    /// This type of message is generated by long running database server statements such as BACKUP DATABASE and LOAD TABLE. 
-    MESSAGE_TYPE_PROGRESS
-} a_sqlany_message_type;
+    typedef enum a_sqlany_message_type
+    {
+        /// The message type was INFO.
+        MESSAGE_TYPE_INFO = 0,
+        /// The message type was WARNING.
+        MESSAGE_TYPE_WARNING,
+        /// The message type was ACTION.
+        MESSAGE_TYPE_ACTION,
+        /// The message type was STATUS.
+        MESSAGE_TYPE_STATUS,
+        /// The message type was PROGRESS.
+        /// This type of message is generated by long running database server statements such as BACKUP DATABASE and LOAD TABLE.
+        MESSAGE_TYPE_PROGRESS
+    } a_sqlany_message_type;
 
-/** Initializes the interface.
+    /** Initializes the interface.
  *
  * The following example demonstrates how to initialize the SQL Anywhere C API DLL:
  *
@@ -510,9 +513,9 @@ typedef enum a_sqlany_message_type {
  * \return 1 on success, 0 otherwise
  * \sa sqlany_fini()
  */
-sacapi_bool sqlany_init( const char * app_name, sacapi_u32 api_version, sacapi_u32 * version_available );
+    sacapi_bool sqlany_init(const char *app_name, sacapi_u32 api_version, sacapi_u32 *version_available);
 
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_2
     /** Initializes the interface using a context.
      *
      * \param app_name A string that names the API used, for example "PHP", "PERL", or "RUBY".
@@ -522,26 +525,26 @@ sacapi_bool sqlany_init( const char * app_name, sacapi_u32 api_version, sacapi_u
      * \return a context object on success and NULL on failure.
      * \sa sqlany_fini_ex()
      */
-    a_sqlany_interface_context *sqlany_init_ex( const char * app_name, sacapi_u32 api_version, sacapi_u32 * version_available );
+    a_sqlany_interface_context *sqlany_init_ex(const char *app_name, sacapi_u32 api_version, sacapi_u32 *version_available);
 #endif
 
-/** Finalizes the interface.
+    /** Finalizes the interface.
  *
  * Frees any resources allocated by the API.
  *
  * \sa sqlany_init()
  */
-void sqlany_fini();
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
+    void sqlany_fini();
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_2
     /** Finalize the interface that was created using the specified context.
      * Frees any resources allocated by the API.
      * \param context A context object that was returned from sqlany_init_ex()
      * \sa sqlany_init_ex()
      */
-    void sqlany_fini_ex( a_sqlany_interface_context *context );
+    void sqlany_fini_ex(a_sqlany_interface_context *context);
 #endif
 
-/** Creates a connection object.
+    /** Creates a connection object.
  *
  * You must create an API connection object before establishing a database connection. Errors can be retrieved 
  * from the connection object. Only one request can be processed on a connection at a time. In addition,
@@ -551,8 +554,8 @@ void sqlany_fini();
  * \return A connection object
  * \sa sqlany_connect(), sqlany_disconnect()
  */
-a_sqlany_connection * sqlany_new_connection( void );
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
+    a_sqlany_connection *sqlany_new_connection(void);
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_2
     /** Creates a connection object using a context.
      * An API connection object needs to be created before a database connection is established. Errors can be retrieved 
      * from the connection object. Only one request can be processed on a connection at a time. In addition,
@@ -562,34 +565,34 @@ a_sqlany_connection * sqlany_new_connection( void );
      * \return A connection object
      * \sa sqlany_connect(), sqlany_disconnect(), sqlany_init_ex()
      */
-    a_sqlany_connection *sqlany_new_connection_ex( a_sqlany_interface_context *context );
+    a_sqlany_connection *sqlany_new_connection_ex(a_sqlany_interface_context *context);
 #endif
 
-/** Frees the resources associated with a connection object.
+    /** Frees the resources associated with a connection object.
  *
  * \param sqlany_conn A connection object created with sqlany_new_connection().
  * \sa sqlany_new_connection()
  */
-void sqlany_free_connection( a_sqlany_connection *sqlany_conn );
+    void sqlany_free_connection(a_sqlany_connection *sqlany_conn);
 
-/** Creates a connection object based on a supplied DBLIB SQLCA pointer.
+    /** Creates a connection object based on a supplied DBLIB SQLCA pointer.
  *
  * \param arg A void * pointer to a DBLIB SQLCA object. 
  * \return A connection object.
  * \sa sqlany_new_connection(), sqlany_execute(), sqlany_execute_direct(), sqlany_execute_immediate(), sqlany_prepare()
  */
-a_sqlany_connection * sqlany_make_connection( void * arg );
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
+    a_sqlany_connection *sqlany_make_connection(void *arg);
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_2
     /** Creates a connection object based on a supplied DBLIB SQLCA pointer and context.
      * \param context A valid context object that was created by sqlany_init_ex()
      * \param arg A void * pointer to a DBLIB SQLCA object. 
      * \return A connection object.
      * \sa sqlany_init_ex(), sqlany_execute(), sqlany_execute_direct(), sqlany_execute_immediate(), sqlany_prepare()
      */
-    a_sqlany_connection *sqlany_make_connection_ex( a_sqlany_interface_context *context, void *arg );
+    a_sqlany_connection *sqlany_make_connection_ex(a_sqlany_interface_context *context, void *arg);
 #endif
 
-/** Creates a connection to a SQL Anywhere database server using the supplied connection object and connection string.
+    /** Creates a connection to a SQL Anywhere database server using the supplied connection object and connection string.
  *
  * The supplied connection object must first be allocated using sqlany_new_connection().
  *
@@ -616,9 +619,9 @@ a_sqlany_connection * sqlany_make_connection( void * arg );
  * retrieve the error code and message.
  * \sa sqlany_new_connection(), sqlany_error()
  */
-sacapi_bool sqlany_connect( a_sqlany_connection * sqlany_conn, const char * str );
+    sacapi_bool sqlany_connect(a_sqlany_connection *sqlany_conn, const char *str);
 
-/** Disconnects an already established SQL Anywhere connection.
+    /** Disconnects an already established SQL Anywhere connection.
  *
  * All uncommitted transactions are rolled back.
  *
@@ -626,17 +629,17 @@ sacapi_bool sqlany_connect( a_sqlany_connection * sqlany_conn, const char * str 
  * \return 1 when successful or 0 when unsuccessful.
  * \sa sqlany_connect(), sqlany_new_connection()
  */
-sacapi_bool sqlany_disconnect( a_sqlany_connection * sqlany_conn );
+    sacapi_bool sqlany_disconnect(a_sqlany_connection *sqlany_conn);
 
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_2
     /** Cancel an outstanding request on a connection.
      * This function can be used to cancel an outstanding request on a specific connection.
      * \param sqlany_conn A connection object with a connection established using sqlany_connect().
      */
-    void sqlany_cancel( a_sqlany_connection * sqlany_conn );
+    void sqlany_cancel(a_sqlany_connection *sqlany_conn);
 #endif
 
-/** Executes the supplied SQL statement immediately without returning a result set.
+    /** Executes the supplied SQL statement immediately without returning a result set.
  *
  * This function is useful for SQL statements that do not return a result set. 
  *
@@ -644,9 +647,9 @@ sacapi_bool sqlany_disconnect( a_sqlany_connection * sqlany_conn );
  * \param sql A string representing the SQL statement to be executed.
  * \return 1 on success or 0 on failure.
  */
-sacapi_bool sqlany_execute_immediate( a_sqlany_connection * sqlany_conn, const char * sql );
+    sacapi_bool sqlany_execute_immediate(a_sqlany_connection *sqlany_conn, const char *sql);
 
-/** Prepares a supplied SQL string.
+    /** Prepares a supplied SQL string.
  *
  * Execution does not happen until sqlany_execute() is 
  * called. The returned statement object should be freed using sqlany_free_stmt().
@@ -670,24 +673,24 @@ sacapi_bool sqlany_execute_immediate( a_sqlany_connection * sqlany_conn, const c
  * to execute the statement.
  * \sa sqlany_free_stmt(), sqlany_connect(), sqlany_execute(), sqlany_num_params(), sqlany_describe_bind_param(), sqlany_bind_param()
  */
-a_sqlany_stmt * sqlany_prepare( a_sqlany_connection * sqlany_conn, const char * sql_str );
+    a_sqlany_stmt *sqlany_prepare(a_sqlany_connection *sqlany_conn, const char *sql_str);
 
-/** Frees resources associated with a prepared statement object.
+    /** Frees resources associated with a prepared statement object.
  *
  * \param sqlany_stmt A statement object returned by the successful execution of sqlany_prepare() or sqlany_execute_direct().
  * \sa sqlany_prepare(), sqlany_execute_direct()
  */
-void sqlany_free_stmt( a_sqlany_stmt * sqlany_stmt );
+    void sqlany_free_stmt(a_sqlany_stmt *sqlany_stmt);
 
-/** Returns the number of parameters expected for a prepared statement.
+    /** Returns the number of parameters expected for a prepared statement.
  *
  * \param sqlany_stmt A statement object returned by the successful execution of sqlany_prepare().
  * \return The expected number of parameters, or -1 if the statement object is not valid.
  * \sa sqlany_prepare()
  */
-sacapi_i32 sqlany_num_params( a_sqlany_stmt * sqlany_stmt );
+    sacapi_i32 sqlany_num_params(a_sqlany_stmt *sqlany_stmt);
 
-/** Describes the bind parameters of a prepared statement.
+    /** Describes the bind parameters of a prepared statement.
  *
  * This function allows the caller to determine information about prepared statement parameters.  The type of prepared
  * statement, stored procedured or a DML, determines the amount of information provided.  The direction of the parameters
@@ -699,9 +702,9 @@ sacapi_i32 sqlany_num_params( a_sqlany_stmt * sqlany_stmt );
  * \return 1 when successful or 0 when unsuccessful.
  * \sa sqlany_bind_param(), sqlany_prepare()
  */
-sacapi_bool sqlany_describe_bind_param( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param * param );
+    sacapi_bool sqlany_describe_bind_param(a_sqlany_stmt *sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param *param);
 
-/** Bind a user-supplied buffer as a parameter to the prepared statement.
+    /** Bind a user-supplied buffer as a parameter to the prepared statement.
  *
  * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
  * \param index The index of the parameter. This number must be between 0 and sqlany_num_params() - 1.
@@ -709,9 +712,9 @@ sacapi_bool sqlany_describe_bind_param( a_sqlany_stmt * sqlany_stmt, sacapi_u32 
  * \return 1 on success or 0 on unsuccessful.
  * \sa sqlany_describe_bind_param()
  */
-sacapi_bool sqlany_bind_param( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param * param );
+    sacapi_bool sqlany_bind_param(a_sqlany_stmt *sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param *param);
 
-/** Sends data as part of a bound parameter.
+    /** Sends data as part of a bound parameter.
  *
  * This method can be used to send a large amount of data for a bound parameter in chunks.
  * This method can be used only when the batch size is 1.
@@ -723,10 +726,9 @@ sacapi_bool sqlany_bind_param( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_
  * \return 1 on success or 0 on failure.
  * \sa sqlany_prepare()
  */
-sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, char * buffer, size_t size );
+    sacapi_bool sqlany_send_param_data(a_sqlany_stmt *sqlany_stmt, sacapi_u32 index, char *buffer, size_t size);
 
-
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_5
     /** Clears param data that was previously been set using \sa sqlany_send_param_data()
      *
      * This method can be used to clear data that was previously been sent using sqlany_send_param_data()
@@ -737,7 +739,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on failure
      * \sa sqlany_prepare(), sqlany_send_param_data()
      */
-    sacapi_bool sqlany_reset_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index );
+    sacapi_bool sqlany_reset_param_data(a_sqlany_stmt *sqlany_stmt, sacapi_u32 index);
 
     /** Retrieves the length of the last error message stored in the connection object
      *  including the NULL terminator.  If there is no error, 0 is returned.
@@ -745,10 +747,10 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \param sqlany_conn A connection object returned from sqlany_new_connection().
      * \return The length of the last error message including the NULL terminator.
      */
-    size_t sqlany_error_length( a_sqlany_connection * sqlany_conn );
+    size_t sqlany_error_length(a_sqlany_connection *sqlany_conn);
 #endif
 
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_4
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_4
     /** Sets the size of the row array for a batch execute. 
      * 
      * The batch size is used only for an INSERT statement. The default batch size is 1. 
@@ -759,7 +761,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on failure.
      * \sa sqlany_bind_param(), sqlany_get_batch_size()
      */
-    sacapi_bool sqlany_set_batch_size( a_sqlany_stmt * sqlany_stmt, sacapi_u32 num_rows );
+    sacapi_bool sqlany_set_batch_size(a_sqlany_stmt *sqlany_stmt, sacapi_u32 num_rows);
 
     /** Sets the bind type of parameters. 
      * 
@@ -778,7 +780,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on failure.
      * \sa sqlany_bind_param()
      */
-    sacapi_bool sqlany_set_param_bind_type( a_sqlany_stmt * sqlany_stmt, size_t row_size );
+    sacapi_bool sqlany_set_param_bind_type(a_sqlany_stmt *sqlany_stmt, size_t row_size);
 
     /** Retrieves the size of the row array for a batch execute.
      *
@@ -786,7 +788,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return The size of the row array.
      * \sa sqlany_set_batch_size()
      */
-    sacapi_u32 sqlany_get_batch_size( a_sqlany_stmt * sqlany_stmt );
+    sacapi_u32 sqlany_get_batch_size(a_sqlany_stmt *sqlany_stmt);
 
     /** Sets the size of the row set to be fetched by the sqlany_fetch_absolute() and sqlany_fetch_next() functions.
      *
@@ -797,7 +799,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on failure.
      * \sa sqlany_bind_column(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_get_rowset_size()
      */
-    sacapi_bool sqlany_set_rowset_size( a_sqlany_stmt * sqlany_stmt, sacapi_u32 num_rows );
+    sacapi_bool sqlany_set_rowset_size(a_sqlany_stmt *sqlany_stmt, sacapi_u32 num_rows);
 
     /** Retrieves the size of the row set to be fetched by the sqlany_fetch_absolute() and sqlany_fetch_next() functions.
      *
@@ -805,7 +807,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return The size of the row set, or 0 if the statement does not return a result set.
      * \sa sqlany_set_rowset_size(), sqlany_fetch_absolute(), sqlany_fetch_next()
      */
-    sacapi_u32 sqlany_get_rowset_size( a_sqlany_stmt * sqlany_stmt );
+    sacapi_u32 sqlany_get_rowset_size(a_sqlany_stmt *sqlany_stmt);
 
     /** Sets the bind type of columns. 
      *
@@ -824,7 +826,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on failure.
      * \sa sqlany_bind_column()
      */
-    sacapi_bool sqlany_set_column_bind_type( a_sqlany_stmt * sqlany_stmt, sacapi_u32 row_size );
+    sacapi_bool sqlany_set_column_bind_type(a_sqlany_stmt *sqlany_stmt, sacapi_u32 row_size);
 
     /** Binds a user-supplied buffer as a result set column to the prepared statement. 
      *  
@@ -838,7 +840,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on unsuccessful.
      * \sa sqlany_clear_column_bindings(), sqlany_set_rowset_size()
      */
-    sacapi_bool sqlany_bind_column( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_data_value * value );
+    sacapi_bool sqlany_bind_column(a_sqlany_stmt *sqlany_stmt, sacapi_u32 index, a_sqlany_data_value *value);
 
     /** Removes all column bindings defined using sqlany_bind_column().
      *
@@ -846,7 +848,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on failure.
      * \sa sqlany_bind_column()
      */
-    sacapi_bool sqlany_clear_column_bindings( a_sqlany_stmt * sqlany_stmt );
+    sacapi_bool sqlany_clear_column_bindings(a_sqlany_stmt *sqlany_stmt);
 
     /** Returns the number of rows fetched.
      *
@@ -860,7 +862,7 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return The number of rows fetched or -1 on failure.
      * \sa sqlany_bind_column(), sqlany_fetch_next(), sqlany_fetch_absolute()
      */
-    sacapi_i32 sqlany_fetched_rows( a_sqlany_stmt * sqlany_stmt );
+    sacapi_i32 sqlany_fetched_rows(a_sqlany_stmt *sqlany_stmt);
 
     /** Sets the current row in the fetched row set.
      *
@@ -874,18 +876,18 @@ sacapi_bool sqlany_send_param_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 inde
      * \return 1 on success or 0 on failure.
      * \sa sqlany_set_rowset_size(), sqlany_get_column(), sqlany_get_data(), sqlany_get_data_info(), sqlany_fetch_absolute(), sqlany_fetch_next()
      */
-    sacapi_bool sqlany_set_rowset_pos( a_sqlany_stmt * sqlany_stmt, sacapi_u32 row_num );
+    sacapi_bool sqlany_set_rowset_pos(a_sqlany_stmt *sqlany_stmt, sacapi_u32 row_num);
 #endif
 
-/** Resets a statement to its prepared state condition.
+    /** Resets a statement to its prepared state condition.
  *
  * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
  * \return 1 on success, 0 on failure.
  * \sa sqlany_prepare()
  */
-sacapi_bool sqlany_reset( a_sqlany_stmt * sqlany_stmt );
+    sacapi_bool sqlany_reset(a_sqlany_stmt *sqlany_stmt);
 
-/** Retrieves information about the parameters that were bound using sqlany_bind_param().
+    /** Retrieves information about the parameters that were bound using sqlany_bind_param().
  *
  * \param sqlany_stmt A statement prepared successfully using sqlany_prepare().
  * \param index The index of the parameter. This number should be between 0 and sqlany_num_params() - 1.
@@ -893,9 +895,9 @@ sacapi_bool sqlany_reset( a_sqlany_stmt * sqlany_stmt );
  * \return 1 on success or 0 on failure.
  * \sa sqlany_bind_param(), sqlany_describe_bind_param(), sqlany_prepare()
  */
-sacapi_bool sqlany_get_bind_param_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param_info * info );
+    sacapi_bool sqlany_get_bind_param_info(a_sqlany_stmt *sqlany_stmt, sacapi_u32 index, a_sqlany_bind_param_info *info);
 
-/** Executes a prepared statement.
+    /** Executes a prepared statement.
  *
  * You can use sqlany_num_cols() to verify if the executed statement returned a result set.
  *
@@ -931,9 +933,9 @@ sacapi_bool sqlany_get_bind_param_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 
  * \return 1 if the statement is executed successfully or 0 on failure. 
  * \sa sqlany_prepare()
  */
-sacapi_bool sqlany_execute( a_sqlany_stmt * sqlany_stmt );
+    sacapi_bool sqlany_execute(a_sqlany_stmt *sqlany_stmt);
 
-/** Executes the SQL statement specified by the string argument and possibly returns a result set.
+    /** Executes the SQL statement specified by the string argument and possibly returns a result set.
  *
  * Use this method to prepare and execute a statement,
  * or instead of calling sqlany_prepare() followed by sqlany_execute().
@@ -962,9 +964,9 @@ sacapi_bool sqlany_execute( a_sqlany_stmt * sqlany_stmt );
  * \return A statement handle if the function executes successfully, NULL when the function executes unsuccessfully.
  * \sa sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_num_cols(), sqlany_get_column()
  */
-a_sqlany_stmt * sqlany_execute_direct( a_sqlany_connection * sqlany_conn, const char * sql_str );
+    a_sqlany_stmt *sqlany_execute_direct(a_sqlany_connection *sqlany_conn, const char *sql_str);
 
-/** Moves the current row in the result set to the specified row number and then fetches 
+    /** Moves the current row in the result set to the specified row number and then fetches 
  *  rows of data starting from the current row. 
  *
  *  The number of rows fetched is set using the sqlany_set_rowset_size() function. By default, one row is returned.
@@ -975,9 +977,9 @@ a_sqlany_stmt * sqlany_execute_direct( a_sqlany_connection * sqlany_conn, const 
  * \return 1 if the fetch was successfully, 0 when the fetch is unsuccessful.
  * \sa sqlany_execute_direct(), sqlany_execute(), sqlany_error(), sqlany_fetch_next(), sqlany_set_rowset_size()
  */
-sacapi_bool sqlany_fetch_absolute( a_sqlany_stmt * sqlany_stmt, sacapi_i32 row_num );
+    sacapi_bool sqlany_fetch_absolute(a_sqlany_stmt *sqlany_stmt, sacapi_i32 row_num);
 
-/** Returns the next set of rows from the result set.
+    /** Returns the next set of rows from the result set.
  *
  * When the result object is first created, the current row 
  * pointer is set to before the first row, that is, row 0.
@@ -991,9 +993,9 @@ sacapi_bool sqlany_fetch_absolute( a_sqlany_stmt * sqlany_stmt, sacapi_i32 row_n
  * \return 1 if the fetch was successfully, 0 when the fetch is unsuccessful.
  * \sa sqlany_fetch_absolute(), sqlany_execute_direct(), sqlany_execute(), sqlany_error(), sqlany_set_rowset_size()
  */
-sacapi_bool sqlany_fetch_next( a_sqlany_stmt * sqlany_stmt );
+    sacapi_bool sqlany_fetch_next(a_sqlany_stmt *sqlany_stmt);
 
-/** Advances to the next result set in a multiple result set query.
+    /** Advances to the next result set in a multiple result set query.
  *
  * If a query (such as a call to a stored procedure) returns multiple result sets, then this function
  * advances from the current result set to the next.
@@ -1017,26 +1019,26 @@ sacapi_bool sqlany_fetch_next( a_sqlany_stmt * sqlany_stmt );
  * \return 1 if the statement successfully advances to the next result set, 0 otherwise.
  * \sa sqlany_execute_direct(), sqlany_execute()
  */
-sacapi_bool sqlany_get_next_result( a_sqlany_stmt * sqlany_stmt );
+    sacapi_bool sqlany_get_next_result(a_sqlany_stmt *sqlany_stmt);
 
-/** Returns the number of rows affected by execution of the prepared statement.
+    /** Returns the number of rows affected by execution of the prepared statement.
  *
  * \param sqlany_stmt A statement that was prepared and executed successfully with no result set returned.
  *                    For example, an INSERT, UPDATE or DELETE statement was executed.
  * \return The number of rows affected or -1 on failure.
  * \sa sqlany_execute(), sqlany_execute_direct()
  */
-sacapi_i32 sqlany_affected_rows( a_sqlany_stmt * sqlany_stmt );
+    sacapi_i32 sqlany_affected_rows(a_sqlany_stmt *sqlany_stmt);
 
-/** Returns number of columns in the result set.
+    /** Returns number of columns in the result set.
  *
  * \param sqlany_stmt A statement object created by sqlany_prepare() or sqlany_execute_direct().
  * \return The number of columns in the result set or -1 on a failure.
  * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_prepare()
  */
-sacapi_i32 sqlany_num_cols( a_sqlany_stmt * sqlany_stmt );
+    sacapi_i32 sqlany_num_cols(a_sqlany_stmt *sqlany_stmt);
 
-/** Returns the number of rows in the result set.
+    /** Returns the number of rows in the result set.
  *
  * By default this function only returns an estimate. To return an exact count, set the row_counts option
  * on the connection. 
@@ -1048,9 +1050,9 @@ sacapi_i32 sqlany_num_cols( a_sqlany_stmt * sqlany_stmt );
  * if the number of rows is exact.
  * \sa sqlany_execute_direct(), sqlany_execute()
  */
-sacapi_i32 sqlany_num_rows( a_sqlany_stmt * sqlany_stmt );
+    sacapi_i32 sqlany_num_rows(a_sqlany_stmt *sqlany_stmt);
 
-/** Fills the supplied buffer with the value fetched for the specified column at the current row.
+    /** Fills the supplied buffer with the value fetched for the specified column at the current row.
  * 
  * When a sqlany_fetch_absolute() or sqlany_fetch_next() function is executed, a row set 
  * is created and the current row is set to be the first row in the row set. The current 
@@ -1078,9 +1080,9 @@ sacapi_i32 sqlany_num_rows( a_sqlany_stmt * sqlany_stmt );
  * not enough memory to retrieve the full value from the SQL Anywhere database server.
  * \sa sqlany_execute_direct(), sqlany_execute(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_set_rowset_pos()
  */
-sacapi_bool sqlany_get_column( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_data_value * buffer );
+    sacapi_bool sqlany_get_column(a_sqlany_stmt *sqlany_stmt, sacapi_u32 col_index, a_sqlany_data_value *buffer);
 
-/** Retrieves the data fetched for the specified column at the current row into the supplied buffer memory.
+    /** Retrieves the data fetched for the specified column at the current row into the supplied buffer memory.
  *
  * When a sqlany_fetch_absolute() or sqlany_fetch_next() function is executed, a row set 
  * is created and the current row is set to be the first row in the row set. The current 
@@ -1100,9 +1102,9 @@ sacapi_bool sqlany_get_column( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index
  * 0 indicates that no data remains to be copied.  -1 indicates a failure.
  * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_set_rowset_pos()
  */
-sacapi_i32 sqlany_get_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, size_t offset, void * buffer, size_t size );
+    sacapi_i32 sqlany_get_data(a_sqlany_stmt *sqlany_stmt, sacapi_u32 col_index, size_t offset, void *buffer, size_t size);
 
-/** Retrieves information about the fetched data at the current row.
+    /** Retrieves information about the fetched data at the current row.
  *
  * When a sqlany_fetch_absolute() or sqlany_fetch_next() function is executed, a row set 
  * is created and the current row is set to be the first row in the row set. The current 
@@ -1115,9 +1117,9 @@ sacapi_i32 sqlany_get_data( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, s
  * \return 1 on success, and 0 on failure. Failure is returned when any of the supplied parameters are invalid.
  * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_fetch_absolute(), sqlany_fetch_next(), sqlany_set_rowset_pos()
  */
-sacapi_bool sqlany_get_data_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_data_info * buffer );
+    sacapi_bool sqlany_get_data_info(a_sqlany_stmt *sqlany_stmt, sacapi_u32 col_index, a_sqlany_data_info *buffer);
 
-/** Retrieves column metadata information and fills the a_sqlany_column_info structure with information about the column.
+    /** Retrieves column metadata information and fills the a_sqlany_column_info structure with information about the column.
  *
  * \param sqlany_stmt A statement object created by sqlany_prepare() or sqlany_execute_direct().
  * \param col_index The column number between 0 and sqlany_num_cols() - 1.
@@ -1126,25 +1128,25 @@ sacapi_bool sqlany_get_data_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_in
  * or if the statement does not return a result set.
  * \sa sqlany_execute(), sqlany_execute_direct(), sqlany_prepare()
  */
-sacapi_bool sqlany_get_column_info( a_sqlany_stmt * sqlany_stmt, sacapi_u32 col_index, a_sqlany_column_info * buffer );
+    sacapi_bool sqlany_get_column_info(a_sqlany_stmt *sqlany_stmt, sacapi_u32 col_index, a_sqlany_column_info *buffer);
 
-/** Commits the current transaction.
+    /** Commits the current transaction.
  *
  * \param sqlany_conn The connection object on which the commit operation is performed.
  * \return 1 when successful or 0 when unsuccessful.
  * \sa sqlany_rollback()
  */
-sacapi_bool sqlany_commit( a_sqlany_connection * sqlany_conn );
+    sacapi_bool sqlany_commit(a_sqlany_connection *sqlany_conn);
 
-/** Rolls back the current transaction.
+    /** Rolls back the current transaction.
  *
  * \param sqlany_conn The connection object on which the rollback operation is to be performed.
  * \return 1 on success, 0 otherwise.
  * \sa sqlany_commit()
  */
-sacapi_bool sqlany_rollback( a_sqlany_connection * sqlany_conn );
+    sacapi_bool sqlany_rollback(a_sqlany_connection *sqlany_conn);
 
-/** Returns the current client version.
+    /** Returns the current client version.
  *
  * This method fills the buffer passed with the major, minor, patch, and build number of the client library. 
  * The buffer will be null-terminated.
@@ -1153,8 +1155,8 @@ sacapi_bool sqlany_rollback( a_sqlany_connection * sqlany_conn );
  * \param len The length of the buffer supplied.
  * \return 1 when successful or 0 when unsuccessful.
  */
-sacapi_bool sqlany_client_version( char * buffer, size_t len );
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_2
+    sacapi_bool sqlany_client_version(char *buffer, size_t len);
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_2
     /** Returns the current client version.
      *
      * This method fills the buffer passed with the major, minor, patch, and build number of the client library. 
@@ -1166,10 +1168,10 @@ sacapi_bool sqlany_client_version( char * buffer, size_t len );
      * \return 1 when successful or 0 when unsuccessful.
      * \sa sqlany_init_ex()
      */
-    sacapi_bool sqlany_client_version_ex( a_sqlany_interface_context *context, char *buffer, size_t len );
+    sacapi_bool sqlany_client_version_ex(a_sqlany_interface_context *context, char *buffer, size_t len);
 #endif
 
-/** Retrieves the last error code and message stored in the connection object.
+    /** Retrieves the last error code and message stored in the connection object.
  *
  * \param sqlany_conn A connection object returned from sqlany_new_connection().
  * \param buffer A buffer to be filled with the error message.
@@ -1177,9 +1179,9 @@ sacapi_bool sqlany_client_version( char * buffer, size_t len );
  * \return The last error code. Positive values are warnings, negative values are errors, and 0 indicates success.
  * \sa sqlany_connect()
  */
-sacapi_i32 sqlany_error( a_sqlany_connection * sqlany_conn, char * buffer, size_t size );
+    sacapi_i32 sqlany_error(a_sqlany_connection *sqlany_conn, char *buffer, size_t size);
 
-/** Retrieves the current SQLSTATE.
+    /** Retrieves the current SQLSTATE.
  *
  * \param sqlany_conn A connection object returned from sqlany_new_connection().
  * \param buffer A buffer to be filled with the current 5-character SQLSTATE.
@@ -1187,16 +1189,16 @@ sacapi_i32 sqlany_error( a_sqlany_connection * sqlany_conn, char * buffer, size_
  * \return The number of bytes copied into the buffer.
  * \sa sqlany_error()
  */
-size_t sqlany_sqlstate( a_sqlany_connection * sqlany_conn, char * buffer, size_t size );
+    size_t sqlany_sqlstate(a_sqlany_connection *sqlany_conn, char *buffer, size_t size);
 
-/** Clears the last stored error code
+    /** Clears the last stored error code
  *
  * \param sqlany_conn A connection object returned from sqlany_new_connection().
  * \sa sqlany_new_connection()
  */
-void sqlany_clear_error( a_sqlany_connection * sqlany_conn );
+    void sqlany_clear_error(a_sqlany_connection *sqlany_conn);
 
-#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_3
+#if _SACAPI_VERSION + 0 >= SQLANY_API_VERSION_3
     /** Register a callback routine.
      *
      * This function can be used to register callback functions.
@@ -1239,7 +1241,7 @@ void sqlany_clear_error( a_sqlany_connection * sqlany_conn );
      * \param callback Address of the callback routine.
      * \return 1 when successful or 0 when unsuccessful.
      */
-    sacapi_bool sqlany_register_callback( a_sqlany_connection * sqlany_conn, a_sqlany_callback_type index, SQLANY_CALLBACK_PARM callback );
+    sacapi_bool sqlany_register_callback(a_sqlany_connection *sqlany_conn, a_sqlany_callback_type index, SQLANY_CALLBACK_PARM callback);
 #endif
 
 #if defined(__cplusplus)
@@ -1278,4 +1280,4 @@ void sqlany_clear_error( a_sqlany_connection * sqlany_conn );
  * This is an example of how to register and use a callback function.
  */
 
-#endif 
+#endif
