@@ -21,12 +21,14 @@ exec( "rm ./build/Release/sqlanywhere.node", function( error, out, err ) {
 		if( error ) {
 		    console.log( error, out );
 		    console.log( "Error when executing node-gyp configure" );
+                    console.log( "Make sure node-gyp is installed and in the PATH");
 		    process.exit( -1 );
 		}
 		var build = require('child_process').exec;
 		build( "node-gyp build", function( error, out ) {
 		    if( error ) {
-			console.log( "Error when executing node-gyp configure" );
+			console.log( "Error when executing node-gyp build" );
+                        console.log( "Make sure a C++ tool chain is installed and in the PATH");
 			process.exit( -1 );
 		    }
 		    db = require( "./lib/index" );
@@ -37,7 +39,7 @@ exec( "rm ./build/Release/sqlanywhere.node", function( error, out, err ) {
 		});
 	    });
 	} catch( err ) {
-	    console.log( "Error Building Binaries. Make sure node-gyp is installed and in the PATH")
+	    console.log( "Error Building Binaries. Make sure node-gyp is installed and in the PATH");
             throw new Error( "Could not build binaries" );
 	    process.exit( -1 );
 	}

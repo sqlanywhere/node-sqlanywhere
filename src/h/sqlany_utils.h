@@ -133,6 +133,7 @@ class ExecuteData {
 };
 
 bool cleanAPI (); // Finalizes the API and frees up resources
+int  getError( a_sqlany_connection *conn, char *str, size_t len );
 void getErrorMsg( a_sqlany_connection *conn, std::string &str );
 void getErrorMsg( int code, std::string &str );
 void throwError( a_sqlany_connection *conn );   

@@ -10,6 +10,14 @@
 using namespace v8;
 using namespace node;
 
+int getError( a_sqlany_connection *conn, char *str, size_t len )
+/**************************************************************/
+{
+    int sqlcode;
+    sqlcode = api.sqlany_error( conn, str, len );
+    return sqlcode;
+}
+
 void getErrorMsg( int code, std::string &str )
 /********************************************/
 {
@@ -57,11 +65,11 @@ void getErrorMsg( a_sqlany_connection *conn, std::string &str )
 /*************************************************************/
 {
     char buffer[SACAPI_ERROR_SIZE];
-    int rc;
-    rc = api.sqlany_error( conn, buffer, sizeof(buffer) );
+    int sqlcode;
+    sqlcode = getError( conn, buffer, sizeof(buffer) );
     std::ostringstream message;
     message << "Code: ";
-    message << rc;
+    message << sqlcode;
     message << " Msg: ";
     message << buffer;
     str = message.str();
@@ -568,13 +576,16 @@ bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
 	}
 	
 	int count_string = 0, count_num = 0, count_int = 0;
-	while( api.sqlany_fetch_next( sqlany_stmt ) ) {
+	while( true ) {
+
+	    if( !api.sqlany_fetch_next( sqlany_stmt ) ) {
+		return false;
+	    }
 
 	    for( int i = 0; i < num_cols; i++ ) {
 
 		if( !api.sqlany_get_column( sqlany_stmt, i, &value ) ) {
 		    return false;
-		    break;
 		}
 	
 		if( *(value.is_null) ) {

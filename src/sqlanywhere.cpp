@@ -85,6 +85,9 @@ static bool fillResult( executeBaton *baton, Persistent<Value> &ResultSet )
 void executeWork( uv_work_t *req )
 /********************************/
 {
+    int rc = 0;
+    int sqlcode = 0;
+
     executeBaton *baton = static_cast<executeBaton*>(req->data);
     scoped_lock lock( baton->obj->conn_mutex );
 
@@ -112,7 +115,7 @@ void executeWork( uv_work_t *req )
 	    return;
 	}
 	baton->stmt_obj->sqlany_stmt = sqlany_stmt;
-	
+
     } else if( sqlany_stmt == NULL ) {
 	baton->err = true;
 	getErrorMsg( JS_ERR_INVALID_OBJECT, baton->error_msg );
@@ -155,12 +158,17 @@ void executeWork( uv_work_t *req )
 	getErrorMsg( baton->obj->conn, baton->error_msg );
 	return;
     }
-    
-    if( !fetchResultSet( sqlany_stmt, baton->rows_affected, baton->colNames,
-			 baton->execData[0], baton->col_types ) ) {
-	baton->err = true;
-	getErrorMsg( baton->obj->conn, baton->error_msg );
-	return;
+
+    rc = fetchResultSet( sqlany_stmt, baton->rows_affected, baton->colNames,
+		    baton->execData[0], baton->col_types );
+
+    if( !rc ) {
+	sqlcode = getError( baton->obj->conn, NULL, 0 );
+	if( (sqlcode != 0) && (sqlcode != 100) ) {
+	    baton->err = true;
+	    getErrorMsg( baton->obj->conn, baton->error_msg );
+	    return;
+	}
     }
 }
 
@@ -283,6 +291,9 @@ NODE_API_FUNC( StmtObject::exec )
 void getMoreResultsWork( uv_work_t *req )
 /***************************************/
 {
+    int rc = 0;
+    int sqlcode = 0;
+
     executeBaton *baton = static_cast<executeBaton*>(req->data);
     scoped_lock lock( baton->obj->conn_mutex );
 
@@ -314,11 +325,16 @@ void getMoreResultsWork( uv_work_t *req )
     }
 
     baton->execData[0]->clear();
-    if( !fetchResultSet( stmt, baton->rows_affected, baton->colNames,
-			 baton->execData[0], baton->col_types ) ) {
-	baton->err = true;
-	getErrorMsg( baton->obj->conn, baton->error_msg );
-	return;
+    rc = fetchResultSet( stmt, baton->rows_affected, baton->colNames,
+		    baton->execData[0], baton->col_types );
+
+    if( !rc ) {
+	sqlcode = getError( baton->obj->conn, NULL, 0 );
+	if( (sqlcode != 0 ) && (sqlcode != 100) ) {
+	    baton->err = true;
+	    getErrorMsg( baton->obj->conn, baton->error_msg );
+	    return;
+	}
     }
 }
 
@@ -563,7 +579,6 @@ void Connection::prepareWork( uv_work_t *req )
 
     baton->obj->sqlany_stmt = api.sqlany_prepare( baton->obj->connection->conn,
 						  baton->stmt.c_str() );
-    
     if( baton->obj->sqlany_stmt == NULL ) {
 	baton->err = true;
 	getErrorMsg( baton->obj->connection->conn, baton->error_msg );
