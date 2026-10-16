@@ -1,10 +1,6 @@
 // ***************************************************************************
 // Copyright (c) 2021 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
-using namespace v8;
-using namespace node;
-
-#include "nodever_cover.h"
 
 /** Represents the connection to the database.
  * @class Connection
@@ -134,41 +130,18 @@ using namespace node;
  * // "uid=dba;pwd=sql;server=MyServer;host=localhost"
  * </pre></p>
  */
-class Connection : public ObjectWrap
+class Connection : public Napi::ObjectWrap<Connection>
 {
   public:
     /// @internal
-#if v010
-    static void Init();
-#else
-    static void Init( Isolate * );
-#endif
+    static Napi::Function Init( Napi::Env env );
 
     /// @internal
-    static NODE_API_FUNC( NewInstance );
-	
-  private:
-    /// @internal
-#if v010
-    Connection( const Arguments &args );
-#else
-    Connection( const FunctionCallbackInfo<Value> &args );
-#endif
+    Connection( const Napi::CallbackInfo &info );
     /// @internal
     ~Connection();
 
-    /// @internal
-    static Persistent<Function> constructor;
-
-    /// @internal
-    static void noParamAfter( uv_work_t *req );
-    /// @internal
-    static void connectAfter( uv_work_t *req );
-    /// @internal
-    static void connectWork( uv_work_t *req );
-    /// @internal
-    static NODE_API_FUNC( New );
-
+  private:
     /// Connect using an existing connection.
     //
     // This method connects to the database using an existing connection.
@@ -242,7 +215,7 @@ class Connection : public ObjectWrap
      *
      * @see Connection::disconnect
      */
-    static NODE_API_FUNC( connect );
+    Napi::Value connect( const Napi::CallbackInfo &info );
 
     /** Closes the current connection.
      *
@@ -275,11 +248,8 @@ class Connection : public ObjectWrap
      *
      * @see Connection::connect
      */
-    static NODE_API_FUNC( disconnect );
-    
-    /// @internal
-    static void disconnectWork( uv_work_t *req );
-	
+    Napi::Value disconnect( const Napi::CallbackInfo &info );
+
     /** Executes the specified SQL statement.
      *
      * This method takes in a SQL statement and an optional array of bind
@@ -335,7 +305,7 @@ class Connection : public ObjectWrap
      * @return If no callback is specified, the result is returned.
      *
      */
-    static NODE_API_FUNC( exec );
+    Napi::Value exec( const Napi::CallbackInfo &info );
 	
     /** Prepares the specified SQL statement.
      *
@@ -373,13 +343,8 @@ class Connection : public ObjectWrap
      * @return If no callback is specified, a Statement object is returned.
      *
      */
-    static NODE_API_FUNC( prepare );
-	
-    /// @internal
-    static void prepareAfter( uv_work_t *req );
-    /// @internal
-    static void prepareWork( uv_work_t *req );
-    
+    Napi::Value prepare( const Napi::CallbackInfo &info );
+
     /** Performs a commit on the connection.
      *
      * This method performs a commit on the connection.
@@ -421,11 +386,8 @@ class Connection : public ObjectWrap
      * @param callback The optional callback function. ( type: Function )
      *
      */
-    static NODE_API_FUNC( commit );
+    Napi::Value commit( const Napi::CallbackInfo &info );
 
-    /// @internal
-    static void commitWork( uv_work_t *req );
-	
     /** Performs a rollback on the connection.
      *
      * This method performs a rollback on the connection.
@@ -465,10 +427,7 @@ class Connection : public ObjectWrap
      * @param callback The optional callback function. ( type: Function )
      *
      */
-    static NODE_API_FUNC( rollback );
-
-    /// @internal
-    static void rollbackWork( uv_work_t *req );
+    Napi::Value rollback( const Napi::CallbackInfo &info );
 
     /** Indicates whether the connection is connected.
      *
@@ -492,21 +451,19 @@ class Connection : public ObjectWrap
      * @return true if the connection is connected, false if not.
      *
      */
-    static NODE_API_FUNC( connected );
+    Napi::Value connected( const Napi::CallbackInfo &info );
 
   public:
     /// @internal
-    a_sqlany_connection	*conn;
+    std::atomic<a_sqlany_connection *>	conn;
     /// @internal
-    unsigned int	max_api_ver;
+    bool 				sqlca_connection;
     /// @internal
-    bool 		sqlca_connection;
+    std::mutex 				conn_mutex;
     /// @internal
-    uv_mutex_t 		conn_mutex;
+    std::string				conn_arg;
     /// @internal
-    Persistent<String>	_arg;
-    /// @internal
-    std::vector<void*>	statements;
+    std::vector<class StmtObject *>	statements;
 
     /// @internal
     void removeStmt( class StmtObject *stmt );

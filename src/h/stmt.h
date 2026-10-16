@@ -1,9 +1,6 @@
 // ***************************************************************************
 // Copyright (c) 2021 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
-using namespace v8;
-
-#include "nodever_cover.h"
 
 /** Represents prepared statement
  * @class Statement
@@ -12,39 +9,24 @@ using namespace v8;
  * times.
  * @see Connection::prepare
  */
-class StmtObject : public node::ObjectWrap
+class StmtObject : public Napi::ObjectWrap<StmtObject>
 {
   public:
     /// @internal
-#if v010
-    static void Init();
-#else
-    static void Init( Isolate * );
-#endif
-    
-    /// @internal
-    static NODE_API_FUNC( NewInstance );
+    static Napi::Function Init( Napi::Env env );
 
     /// @internal
-#if !v010
-    static void CreateNewInstance( const FunctionCallbackInfo<Value> &args,
-				   Persistent<Object> &obj );
-#endif
+    static Napi::Object NewInstance( Napi::Env env );
 
     /// @internal
-    StmtObject();
+    StmtObject( const Napi::CallbackInfo &info );
     /// @internal
     ~StmtObject();
     /// @internal
     void cleanup( void );
-    void removeConnection( void );
 
   private:
-    /// @internal
-    static Persistent<Function> constructor;
-    /// @internal
-    static NODE_API_FUNC( New );
-	
+
     /** Executes the prepared SQL statement.
      *
      * This method optionally takes in an array of bind
@@ -89,7 +71,7 @@ class StmtObject : public node::ObjectWrap
      * @return If no callback is specified, the result is returned.
      *
      */
-    static NODE_API_FUNC( exec );
+    Napi::Value exec( const Napi::CallbackInfo &info );
     
     /** Drops the statement.
      *
@@ -125,12 +107,7 @@ class StmtObject : public node::ObjectWrap
      * @param callback The optional callback function.
      *
      */
-    static NODE_API_FUNC( drop );
-
-    /// @internal
-    static void dropAfter( uv_work_t *req );
-    /// @internal
-    static void dropWork( uv_work_t *req );
+    Napi::Value drop( const Napi::CallbackInfo &info );
 
     /** Gets the next result set of a multi-result-set query.
      *
@@ -166,11 +143,26 @@ class StmtObject : public node::ObjectWrap
      * @param callback The optional callback function.
      *
      */
-    static NODE_API_FUNC( getMoreResults );
+    Napi::Value getMoreResults( const Napi::CallbackInfo &info );
 
   public:
     /// @internal
-    Connection		*connection;
+    /// NULL once the statement is dropped or its connection object is freed.
+    /// Only changed on the main thread.
+    Connection				*connection;
     /// @internal
-    a_sqlany_stmt	*sqlany_stmt;
+    std::atomic<a_sqlany_stmt *>	sqlany_stmt;
+    /// @internal
+    /// The SQL text, which wide_stmt is prepared from.
+    std::string				sql;
+    /// @internal
+    /// A second handle of the statement for executions with several rows,
+    /// prepared on first use. sqlany_set_batch_size() leaves the SQLDA at
+    /// its largest size, which a single-row execution reads in full, and
+    /// only sqlany_reset() shrinks it again. But a handle that is reset can
+    /// only execute more rows than in any earlier execution (error -182
+    /// otherwise), and resetting breaks CALLs with OUT parameters, so no
+    /// handle is reset and sqlany_stmt only executes single rows. Only used
+    /// while holding the connection mutex.
+    a_sqlany_stmt			*wide_stmt;
 };

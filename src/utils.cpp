@@ -1,22 +1,14 @@
 // ***************************************************************************
-// Copyright (c) 2019 SAP SE or an SAP affiliate company. All rights reserved.
+// Copyright (c) 2017 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
-#include "nodever_cover.h"
+#include <cmath>
+#include <stdint.h>
 #include "sqlany_utils.h"
-#include "nan.h"
 
-#if !v010
-
-using namespace v8;
-using namespace node;
-
-int getError( a_sqlany_connection *conn, char *str, size_t len )
-/**************************************************************/
-{
-    int sqlcode;
-    sqlcode = api.sqlany_error( conn, str, len );
-    return sqlcode;
-}
+struct AddonData {
+    Napi::FunctionReference	connection_ctor;
+    Napi::FunctionReference	stmt_ctor;
+};
 
 void getErrorMsg( int code, std::string &str )
 /********************************************/
@@ -25,7 +17,7 @@ void getErrorMsg( int code, std::string &str )
     message << "Code: ";
     message << code;
     message << " Msg: ";
-    
+
     switch( code ) {
 	case JS_ERR_INVALID_OBJECT:
 	    message << "Invalid Object";
@@ -65,647 +57,395 @@ void getErrorMsg( a_sqlany_connection *conn, std::string &str )
 /*************************************************************/
 {
     char buffer[SACAPI_ERROR_SIZE];
-    int sqlcode;
-    sqlcode = getError( conn, buffer, sizeof(buffer) );
+    int rc;
+    rc = api.sqlany_error( conn, buffer, sizeof(buffer) );
     std::ostringstream message;
     message << "Code: ";
-    message << sqlcode;
+    message << rc;
     message << " Msg: ";
     message << buffer;
     str = message.str();
 }
 
-void throwError( a_sqlany_connection *conn )
-/******************************************/
+void throwError( Napi::Env env, int code )
+/****************************************/
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    std::string message;
-    getErrorMsg( conn, message );
-    isolate->ThrowException( 
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ) ) );
-}
-
-void throwError( int code )
-/*************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
     std::string message;
     getErrorMsg( code, message );
-    isolate->ThrowException( 
-	Exception::Error( String::NewFromUtf8( isolate, message.c_str() ) ) );
+    throw Napi::Error::New( env, message );
 }
 
-void callBack( std::string *		str,
-	       Persistent<Function> &	callback,
-	       Local<Value> &		Result,
-	       bool			callback_required )
-/*********************************************************/
+Napi::Value reportError( Napi::Env env, int code, Napi::Value callback )
+/**********************************************************************/
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    Local<Function> local_callback = Local<Function>::New( isolate, callback );
+    std::string message;
+    getErrorMsg( code, message );
+    Napi::Error err = Napi::Error::New( env, message );
+    if( !callback.IsFunction() ) {
+	throw err;
+    }
+    callback.As<Napi::Function>().Call( env.Global(),
+					{ err.Value(), env.Undefined() } );
+    return env.Undefined();
+}
 
-    // If string is NULL, then there is no error
-    if( callback_required ) {
-	if( !local_callback->IsFunction() ) {
-	    throwError( JS_ERR_INVALID_ARGUMENTS );
-	    return;
-	}
-	
-	Local<Value> Err;
-	if( str == NULL ) {
-	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
-	
-	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) );
-	}
-	
-	int argc = 2;
-	Local<Value> argv[2] = { Err, Result };
-	
-#if v012
-	TryCatch try_catch;
-#else
-        TryCatch try_catch( isolate );
-#endif
-        Nan::Callback *cb = new Nan::Callback( local_callback );
-        Nan::Call( *cb, argc, argv );
-	if( try_catch.HasCaught()) {
-	    node::FatalException( isolate, try_catch );
-	}
+// Mirrors v8::Value::IsInt32(): integral numbers in int32 range, except -0
+static bool getInt32( const Napi::Value &val, int &out )
+/******************************************************/
+{
+    if( !val.IsNumber() ) {
+	return false;
+    }
+    double d = val.As<Napi::Number>().DoubleValue();
+    if( !( d >= INT32_MIN && d <= INT32_MAX ) || ( d == 0 && std::signbit( d ) ) ) {
+	return false;
+    }
+    out = (int)d;
+    return (double)out == d;
+}
+
+static void copyBytes( const Napi::Value &val, std::vector<char> &dest, size_t &len )
+/***********************************************************************************/
+{
+    // dest always gets a terminating NUL so that it is never empty and
+    // strings can be bound as C strings
+    if( val.IsString() ) {
+	std::string str = val.As<Napi::String>().Utf8Value();
+	len = str.size();
+	dest.assign( str.c_str(), str.c_str() + len + 1 );
     } else {
-	if( str != NULL ) {
-	    isolate->ThrowException(
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) ) );
-	}
+	Napi::Buffer<char> buf = val.As<Napi::Buffer<char>>();
+	len = buf.Length();
+	dest.assign( buf.Data(), buf.Data() + len );
+	dest.push_back( '\0' );
     }
 }
 
-void callBack( std::string *		str,
-	       Persistent<Function> &	callback,
-	       Persistent<Value> &	Result,
-	       bool			callback_required )
-/*********************************************************/
+BindParams::Column *BindParams::addColumn( a_sqlany_bind_param &param )
+/*********************************************************************/
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    Local<Value> local_result = Local<Value>::New( isolate, Result );
-
-    callBack( str, callback, local_result, callback_required );
+    memset( &param, 0, sizeof( param ) );
+    columns.emplace_back( new Column );
+    return columns.back().get();
 }
 
-void callBack( std::string *		str,
-	       const Local<Value> &	arg,
-	       Local<Value> &		Result,
-	       bool			callback_required )
-/*********************************************************/
+bool BindParams::parseWide( Napi::Array rows )
+/********************************************/
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-
-    // If string is NULL, then there is no error
-    if( callback_required ) {
-	if( !arg->IsFunction() ) {
-	    throwError( JS_ERR_INVALID_ARGUMENTS );
-	    return;
-	}
-	Local<Function> callback = Local<Function>::Cast(arg);
-	
-	Local<Value> Err;
-	if( str == NULL ) {
-	    Err = Local<Value>::New( isolate, Undefined( isolate ) );
-	
-	} else {
-	    Err = Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) );
-	}
-	
-	int argc = 2;
-	Local<Value> argv[2] = { Err,  Result };
-	
-#if v012
-	TryCatch try_catch;
-#else
-        TryCatch try_catch( isolate );
-#endif
-        Nan::Callback *cb = new Nan::Callback( callback );
-        Nan::Call( *cb, argc, argv );
-	if( try_catch.HasCaught()) {
-	    node::FatalException( isolate, try_catch );
-	}
-	
-    } else {
-	if( str != NULL ) {
-	    isolate->ThrowException( 
-		Exception::Error( String::NewFromUtf8( isolate, str->c_str() ) ) );
-	}
-    }
-}
-
-static bool getWideBindParameters( std::vector<ExecuteData *>		&execData,
-                                   Isolate *            isolate,
-                                   Local<Value>         arg,
-				   std::vector<a_sqlany_bind_param> &	params,
-				   unsigned				&num_rows )
-/*********************************************************************************/
-{
-    Local<Context>  context = isolate->GetCurrentContext();
-    Local<Array>    rows = Local<Array>::Cast( arg );
-    num_rows = rows->Length();
-
-    Local<Array>        row0 = Local<Array>::Cast( rows->Get(0) );
-    unsigned		num_cols = row0->Length();
-    unsigned		c;
-
-    if( num_cols == 0 ) {
-	// if an empty array was passed in, we still need ExecuteData
-	ExecuteData *ex = new ExecuteData;
-	execData.push_back( ex );
-	return true;
-    }
-
-    // Make sure that each array in the list has the same number and types
-    // of values
-    for( unsigned int r = 1; r < num_rows; r++ ) {
-        Local<Array>    row = Local<Array>::Cast( rows->Get(r) );
-	for( c = 0; c < num_cols; c++ ) {
-            Local<Value> val0 = row0->Get(c);
-            Local<Value> val = row->Get(c);
-
-	    if( ( val0->IsInt32() || val0->IsNumber() ) &&
-		( !val->IsInt32() && !val->IsNumber() && !val->IsNull() ) ) {
-		return false;
-	    }
-	    if( val0->IsString() &&
-		!val->IsString() && !val->IsNull() ) {
-		return false;
-	    }
-	    if( Buffer::HasInstance( val0 ) &&
-		!Buffer::HasInstance( val ) && !val->IsNull() ) {
-		return false;
-	    }
-	}
-    }
-
-    for( c = 0; c < num_cols; c++ ) {
-	a_sqlany_bind_param 	param;
-	memset( &param, 0, sizeof( param ) );
-
-	ExecuteData *ex = new ExecuteData;
-	execData.push_back( ex );
-
-	double *	param_double = new double[num_rows];
-	ex->addNum( param_double );
-	char **		char_arr = new char *[num_rows];
-	size_t *	len = new size_t[num_rows];
-	ex->addStrings( char_arr, len );
-	sacapi_bool *	is_null = new sacapi_bool[num_rows];
-	ex->addNull( is_null );
-	param.value.is_null	= is_null;
-	param.value.is_address	= false;
-
-	if( row0->Get(c)->IsInt32() || row0->Get(c)->IsNumber() ) {
-	    param.value.type	= A_DOUBLE;
-	    param.value.buffer	= (char *)( param_double );
-
-	} else if( row0->Get(c)->IsString() ) {
-	    param.value.type	= A_STRING;
-	    param.value.buffer	= (char *)char_arr;
-	    param.value.length	= len;
-	    param.value.is_address = true;
-
-	} else if( Buffer::HasInstance( row0->Get(c) ) ) {
-	    param.value.type	= A_BINARY;
-	    param.value.buffer	= (char *)char_arr;
-	    param.value.length	= len;
-	    param.value.is_address = true;
-	    
-	} else if( row0->Get(c)->IsNull() ) {
-
-	} else{
+    num_rows = rows.Length();
+    std::vector<Napi::Array> row_arrs;
+    for( unsigned r = 0; r < num_rows; r++ ) {
+	Napi::Value row = rows.Get( r );
+	if( !row.IsArray() ) {
 	    return false;
 	}
+	row_arrs.push_back( row.As<Napi::Array>() );
+    }
+    unsigned num_cols = row_arrs[0].Length();
 
-	for( unsigned int r = 0; r < num_rows; r++ ) {
-            Local<Array>    bind_params = Local<Array>::Cast( rows->Get(r) );
-	
-	    is_null[r] = false;
-	    if( bind_params->Get(c)->IsInt32() || bind_params->Get(c)->IsNumber() ) {
-                param_double[r] = bind_params->Get(c)->NumberValue(context).FromJust();
-	
-            } else if( bind_params->Get(c)->IsString() ) {
-#if NODE_MAJOR_VERSION >= 12
-                String::Utf8Value paramValue( isolate, (bind_params->Get(c)->ToString(context)).ToLocalChecked() );
-#else
-                String::Utf8Value paramValue( (bind_params->Get(c)->ToString(context)).ToLocalChecked() );
-#endif
-		const char* param_string = (*paramValue);
-		len[r] = (size_t)paramValue.length();
-		char *param_char = new char[len[r] + 1];
-		char_arr[r] = param_char;
-		memcpy( param_char, param_string, len[r] + 1 );
-		
-	    } else if( Buffer::HasInstance( bind_params->Get(c) ) ) {
-		len[r] = Buffer::Length( bind_params->Get(c) );
-		char *param_char = new char[len[r]];
-		char_arr[r] = param_char;
-		memcpy( param_char, Buffer::Data( bind_params->Get(c) ), len[r] );
-
-	    } else if( bind_params->Get(c)->IsNull() ) {
-		is_null[r] = true;
+    for( unsigned c = 0; c < num_cols; c++ ) {
+	// The first non-null value decides the type of the column; the other
+	// values must be of the same type or null
+	std::vector<Napi::Value> vals;
+	a_sqlany_data_type type = A_INVALID_TYPE;
+	bool has_null = false;
+	for( unsigned r = 0; r < num_rows; r++ ) {
+	    Napi::Value val = row_arrs[r].Get( c );
+	    a_sqlany_data_type val_type;
+	    if( val.IsNull() ) {
+		val_type = A_INVALID_TYPE;
+		has_null = true;
+	    } else if( val.IsNumber() ) {
+		val_type = A_DOUBLE;
+	    } else if( val.IsString() ) {
+		val_type = A_STRING;
+	    } else if( val.IsBuffer() ) {
+		val_type = A_BINARY;
+	    } else {
+		return false;
 	    }
-        }
+	    if( type == A_INVALID_TYPE ) {
+		type = val_type;
+	    } else if( val_type != A_INVALID_TYPE && val_type != type ) {
+		return false;
+	    }
+	    vals.push_back( val );
+	}
+	if( type == A_INVALID_TYPE ) {
+	    type = A_STRING;
+	} else if( has_null ) {
+	    mixed_nulls = true;
+	}
 
+	a_sqlany_bind_param param;
+	Column *col = addColumn( param );
+	col->nulls.resize( num_rows );
+	param.value.type = type;
+	param.value.is_null = col->nulls.data();
+
+	if( type == A_DOUBLE ) {
+	    col->nums.resize( num_rows );
+	    for( unsigned r = 0; r < num_rows; r++ ) {
+		col->nulls[r] = vals[r].IsNull();
+		if( !col->nulls[r] ) {
+		    col->nums[r] = vals[r].As<Napi::Number>().DoubleValue();
+		}
+	    }
+	    param.value.buffer = (char *)col->nums.data();
+	    param.value.is_address = false;
+	} else {
+	    col->data.resize( num_rows );
+	    col->ptrs.resize( num_rows, NULL );
+	    col->lens.resize( num_rows, 0 );
+	    for( unsigned r = 0; r < num_rows; r++ ) {
+		col->nulls[r] = vals[r].IsNull();
+		if( !col->nulls[r] ) {
+		    copyBytes( vals[r], col->data[r], col->lens[r] );
+		    col->ptrs[r] = col->data[r].data();
+		}
+	    }
+	    param.value.buffer = (char *)col->ptrs.data();
+	    param.value.length = col->lens.data();
+	    param.value.is_address = true;
+	}
 	params.push_back( param );
     }
-
-    return true;	   
+    return true;
 }
 
-bool getBindParameters( std::vector<ExecuteData *>		&execData,
-                        Isolate *                               isolate,
-                        Local<Value>                            arg,
-			std::vector<a_sqlany_bind_param> &	params,
-			unsigned				&num_rows )
-/*************************************************************************/
+void BindParams::addNulls( unsigned num_params )
+/**********************************************/
 {
-    Local<Context>      context = isolate->GetCurrentContext();
-    Local<Array>        bind_params = Local<Array>::Cast( arg );
-
-    if( bind_params->Length() == 0 ) {
-	// if an empty array was passed in, we still need ExecuteData
-	ExecuteData *ex = new ExecuteData;
-	execData.push_back( ex );
-	return true;
+    while( params.size() < num_params ) {
+	// Laid out as a parsed NULL, or as a column of NULLs for several rows
+	a_sqlany_bind_param param;
+	Column *col = addColumn( param );
+	col->nulls.resize( num_rows, true );
+	param.value.type = A_STRING;
+	param.value.is_null = col->nulls.data();
+	if( num_rows > 1 ) {
+	    col->ptrs.resize( num_rows, NULL );
+	    col->lens.resize( num_rows, 0 );
+	    param.value.buffer = (char *)col->ptrs.data();
+	    param.value.length = col->lens.data();
+	    param.value.is_address = true;
+	}
+	params.push_back( param );
     }
+}
 
-    if( bind_params->Get(0)->IsArray() ) {
-        return getWideBindParameters( execData, isolate, arg, params, num_rows );
+a_sqlany_data_value BindParams::rowValue( unsigned i, unsigned first ) const
+/**************************************************************************/
+{
+    a_sqlany_data_value value = params[i].value;
+    if( first > 0 ) {
+	// Multi-row binds hold arrays of doubles or of pointers to the data
+	value.buffer += first * ( value.is_address ? sizeof( char * ) : sizeof( double ) );
+	if( value.length != NULL ) {
+	    value.length += first;
+	}
+	value.is_null += first;
     }
+    return value;
+}
+
+bool BindParams::parse( Napi::Array arg )
+/***************************************/
+{
     num_rows = 1;
-
-    ExecuteData *ex = new ExecuteData;
-    execData.push_back( ex );
-
-    for( unsigned int i = 0; i < bind_params->Length(); i++ ) {
-	a_sqlany_bind_param 	param;
-	memset( &param, 0, sizeof( param ) );
-
-	if( bind_params->Get(i)->IsInt32() ) {
-	    int *param_int = new int;
-            *param_int = bind_params->Get(i)->Int32Value(context).FromJust();
-	    ex->addInt( param_int );
-	    param.value.buffer = (char *)( param_int );
-	    param.value.type   = A_VAL32;
-	    
-	} else if( bind_params->Get(i)->IsNumber() ) {
-	    double *param_double = new double;
-            *param_double = bind_params->Get(i)->NumberValue(context).FromJust(); // Remove Round off Error
-	    ex->addNum( param_double );
-	    param.value.buffer = (char *)( param_double );
-	    param.value.type   = A_DOUBLE;
-	
-	} else if( bind_params->Get(i)->IsString() ) {
-#if NODE_MAJOR_VERSION >= 12
-            String::Utf8Value paramValue( isolate, (bind_params->Get(i)->ToString(context)).ToLocalChecked() );
-#else
-            String::Utf8Value paramValue( (bind_params->Get(i)->ToString(context)).ToLocalChecked() );
-#endif
-            const char* param_string = (*paramValue);
-	    size_t *len = new size_t;
-	    *len = (size_t)paramValue.length();
-	    
-	    char **char_arr = new char *;
-	    char *param_char = new char[*len + 1];
-	    *char_arr = param_char;
-
-	    memcpy( param_char, param_string, ( *len ) + 1 );
-	    ex->addStrings( char_arr, len );
-	    
-	    param.value.type = A_STRING;
-	    param.value.buffer = param_char;
-	    param.value.length = len;
-	    param.value.buffer_size = *len + 1;
-	    
-	} else if( Buffer::HasInstance( bind_params->Get(i) ) ) {
-	    size_t *len = new size_t;
-	    *len = Buffer::Length( bind_params->Get(i) );
-	    char **char_arr = new char *;
-	    char *param_char = new char[*len];
-	    *char_arr = param_char;
-	    
-	    memcpy( param_char, Buffer::Data( bind_params->Get(i) ), *len );
-	    ex->addStrings( char_arr, len );
-	    
-	    param.value.type = A_BINARY;
-	    param.value.buffer = param_char;
-	    param.value.length = len;
-	    param.value.buffer_size = sizeof( param_char );
-	    
-	} else if( bind_params->Get(i)->IsNull() ) {
-	    param.value.type = A_STRING;
-	    sacapi_bool *is_null = new sacapi_bool;
-	    param.value.is_null = is_null;
-	    ex->addNull( is_null );
-	    is_null[0] = true;
-	    
-	} else{
-	    return false;
-	}
-	    
-	params.push_back( param );
-    }
-
-    return true;	   
-}
-
-bool getResultSet( Persistent<Value> &			Result,
-		   int &				rows_affected,
-		   std::vector<char *> &		colNames,
-		   ExecuteData *			execData,
-		   std::vector<a_sqlany_data_type> &	col_types )
-/*****************************************************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    int 	num_rows = 0;
-    size_t	num_cols = colNames.size();
-
-    if( rows_affected >= 0 ) {
-	Result.Reset( isolate, Integer::New( isolate, rows_affected ) );
+    if( arg.Length() == 0 ) {
 	return true;
     }
-    
-    if( num_cols > 0 ) {
-	size_t count = 0;
-	size_t count_int = 0, count_num = 0, count_string = 0;
-	Local<Array> ResultSet = Array::New( isolate );
-	while( count_int < execData->intSize() ||
-	       count_num < execData->numSize() ||
-	       count_string < execData->stringSize() ) {
-	    Local<Object> curr_row = Object::New( isolate );
-	    num_rows++;
-	    for( size_t i = 0; i < num_cols; i++ ) {
-		switch( col_types[count] ) {
-		    case A_INVALID_TYPE:
-			curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-				       Null( isolate ) );
-			break;
-
-		    case A_VAL32:
-		    case A_VAL16:
-		    case A_UVAL16:
-		    case A_VAL8:
-		    case A_UVAL8:
-			if( execData->intIsNull( count_int ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
-			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Integer::New( isolate, execData->getInt( count_int ) ) );
-			}
-			count_int++;
-			break;
-			
-		    case A_UVAL32:
-		    case A_UVAL64:
-		    case A_VAL64:
-		    case A_DOUBLE:
-			if( execData->numIsNull( count_num ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
-			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Number::New( isolate, execData->getNum( count_num ) ) );
-			}
-			count_num++;
-			break;
-			
-		    case A_BINARY:
-			if( execData->stringIsNull( count_string ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
-			} else {
-#if v012
-			    Local<Object> buf = node::Buffer::New( 
-				isolate, execData->getString( count_string ),
-				execData->getLen( count_string ) ); 
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-					   buf );
-#else
-			    MaybeLocal<Object> mbuf = node::Buffer::Copy( 
-				isolate, execData->getString( count_string ),
-				execData->getLen( count_string ) ); 
-			    Local<Object> buf = mbuf.ToLocalChecked();
-#endif
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-					   buf );
-			}
-			count_string++;
-			break;
-			
-		    case A_STRING:		    
-			if( execData->stringIsNull( count_string ) ) {
-			    curr_row->Set( String::NewFromUtf8( isolate, colNames[i] ),
-					   Null( isolate ) );
-			} else {
-			    curr_row->Set( String::NewFromUtf8( isolate,
-								colNames[i] ),
-#if v012
-					   String::NewFromUtf8( isolate,
-								execData->getString( count_string ),
-								String::NewStringType::kNormalString,
-								(int)execData->getLen( count_string ) )
-#else
-					   String::NewFromUtf8( isolate,
-								execData->getString( count_string ),
-								NewStringType::kNormal,
-								(int)execData->getLen( count_string ) ).ToLocalChecked()
-#endif
-				);
-			}
-			count_string++;
-			break;
-		
-		    default:
-			return false;
-		}
-		count++;
-	    }
-	    ResultSet->Set( num_rows - 1, curr_row );
-	}
-	Result.Reset( isolate, ResultSet );
-    } else {
-	Result.Reset( isolate, Local<Value>::New( isolate, 
-						  Undefined( isolate ) ) );
+    if( arg.Get( (uint32_t)0 ).IsArray() ) {
+	return parseWide( arg );
     }
-    
+
+    for( unsigned i = 0; i < arg.Length(); i++ ) {
+	Napi::Value val = arg.Get( i );
+	a_sqlany_bind_param param;
+	Column *col = addColumn( param );
+
+	if( getInt32( val, col->int_val ) ) {
+	    param.value.buffer = (char *)&col->int_val;
+	    param.value.type   = A_VAL32;
+
+	} else if( val.IsNumber() ) {
+	    col->nums.push_back( val.As<Napi::Number>().DoubleValue() );
+	    param.value.buffer = (char *)col->nums.data();
+	    param.value.type   = A_DOUBLE;
+
+	} else if( val.IsString() || val.IsBuffer() ) {
+	    col->data.resize( 1 );
+	    col->lens.resize( 1 );
+	    copyBytes( val, col->data[0], col->lens[0] );
+	    param.value.buffer = col->data[0].data();
+	    param.value.length = col->lens.data();
+	    if( val.IsString() ) {
+		param.value.type = A_STRING;
+		param.value.buffer_size = col->lens[0] + 1;
+	    } else {
+		param.value.type = A_BINARY;
+		param.value.buffer_size = col->lens[0];
+	    }
+
+	} else if( val.IsNull() ) {
+	    col->nulls.push_back( true );
+	    param.value.type = A_STRING;
+	    param.value.is_null = col->nulls.data();
+
+	} else {
+	    return false;
+	}
+
+	params.push_back( param );
+    }
     return true;
 }
 
-bool fetchResultSet( a_sqlany_stmt *			sqlany_stmt,
-		     int &				rows_affected,
-		     std::vector<char *> &		colNames,
-		     ExecuteData *			execData,
-		     std::vector<a_sqlany_data_type> &	col_types )
-/*****************************************************************/
+bool ResultSet::fetch( a_sqlany_connection *	conn,
+		       a_sqlany_stmt *		sqlany_stmt,
+		       std::string &		error_msg )
+/***********************************************************/
 {
-    
-    a_sqlany_data_value		value;
-    int				num_cols = 0;
-    
     rows_affected = api.sqlany_affected_rows( sqlany_stmt );
-    num_cols = api.sqlany_num_cols( sqlany_stmt );
-    
-    
-    if( rows_affected > 0 && num_cols < 1 ) {
-        return true;
-    }
-    
-    rows_affected = -1;
-    if( num_cols > 0 ) {
-	
-	for( int i = 0; i < num_cols; i++ ) {
-	    a_sqlany_column_info info;
-	    api.sqlany_get_column_info( sqlany_stmt, i, &info );
-	    size_t size = strlen( info.name ) + 1;
-	    char *name = new char[ size ];
-	    memcpy( name, info.name, size );
-	    colNames.push_back( name );
-	}
-	
-	int count_string = 0, count_num = 0, count_int = 0;
-	while( true ) {
+    int num_cols = api.sqlany_num_cols( sqlany_stmt );
 
-	    if( !api.sqlany_fetch_next( sqlany_stmt ) ) {
+    if( rows_affected > 0 && num_cols < 1 ) {
+	return true;
+    }
+
+    rows_affected = -1;
+    if( num_cols < 1 ) {
+	return true;
+    }
+
+    for( int i = 0; i < num_cols; i++ ) {
+	a_sqlany_column_info info;
+	if( !api.sqlany_get_column_info( sqlany_stmt, i, &info ) ) {
+	    getErrorMsg( conn, error_msg );
+	    return false;
+	}
+	col_names.push_back( info.name );
+    }
+
+    while( api.sqlany_fetch_next( sqlany_stmt ) ) {
+	for( int i = 0; i < num_cols; i++ ) {
+	    a_sqlany_data_value value;
+	    if( !api.sqlany_get_column( sqlany_stmt, i, &value ) ) {
+		getErrorMsg( conn, error_msg );
 		return false;
 	    }
 
-	    for( int i = 0; i < num_cols; i++ ) {
+	    cells.emplace_back();
+	    Cell &cell = cells.back();
+	    cell.kind = Cell::Number;
+	    if( *(value.is_null) ) {
+		cell.kind = Cell::Null;
+		continue;
+	    }
 
-		if( !api.sqlany_get_column( sqlany_stmt, i, &value ) ) {
+	    switch( value.type ) {
+		case A_BINARY:
+		    cell.kind = Cell::Binary;
+		    cell.bytes.assign( value.buffer, *(value.length) );
+		    break;
+		case A_STRING:
+		    cell.kind = Cell::String;
+		    cell.bytes.assign( value.buffer, *(value.length) );
+		    break;
+		case A_VAL64:
+		    cell.num = (double)*(long long *)value.buffer;
+		    break;
+		case A_UVAL64:
+		    cell.num = (double)*(unsigned long long *)value.buffer;
+		    break;
+		case A_VAL32:
+		    cell.num = *(int *)value.buffer;
+		    break;
+		case A_UVAL32:
+		    cell.num = *(unsigned int *)value.buffer;
+		    break;
+		case A_VAL16:
+		    cell.num = *(short *)value.buffer;
+		    break;
+		case A_UVAL16:
+		    cell.num = *(unsigned short *)value.buffer;
+		    break;
+		case A_VAL8:
+		    cell.num = *(signed char *)value.buffer;
+		    break;
+		case A_UVAL8:
+		    cell.num = *(unsigned char *)value.buffer;
+		    break;
+		case A_DOUBLE:
+		    cell.num = *(double *)value.buffer;
+		    break;
+#if _SACAPI_VERSION+0 >= SQLANY_API_VERSION_5
+		case A_FLOAT:
+		    cell.num = *(float *)value.buffer;
+		    break;
+#endif
+		default:
+		    getErrorMsg( JS_ERR_RESULTSET, error_msg );
 		    return false;
-		}
-	
-		if( *(value.is_null) ) {
-		    col_types.push_back( A_INVALID_TYPE );
-		    continue;
-		}
-		
-		switch( value.type ) {
-		    case A_BINARY:
-		    {
-			size_t *size = new size_t;
-			*size = *(value.length);
-			char *val = new char[ *size ];
-			memcpy( val, value.buffer, *size );
-			execData->addString( val, size );
-			count_string++;
-			break;
-		    }
-		    
-		    case A_STRING:
-		    {
-			size_t *size = new size_t;
-			*size = (size_t)( (int)*(value.length) );
-			char *val = new char[ *size ];
-			memcpy( val, (char *)value.buffer, *size );
-			execData->addString( val, size );
-			count_string++;
-			break;
-		    }
-			
-		    case A_VAL64:
-		    {
-			double *val = new double;
-			*val = (double)*(long long *)value.buffer;
-			execData->addNum( val );
-			count_num++;
-			break;
-		    }
-			
-		    case A_UVAL64:
-		    {
-			double *val = new double;
-			*val = (double)*(unsigned long long *)value.buffer;
-			execData->addNum( val );
-			count_num++;
-			break;
-		    }
-			
-		    case A_VAL32:
-		    {
-			int *val = new int;
-			*val = *(int*)value.buffer;
-			execData->addInt( val );
-			count_int++;
-			break;
-		    }
-
-		    case A_UVAL32:
-		    {
-			double *val = new double;
-			*val = (double)*(unsigned int*)value.buffer;
-			execData->addNum( val );
-			count_num++;
-			break;
-		    }
-			
-		    case A_VAL16:
-		    {
-			int *val = new int;
-			*val = (int)*(short*)value.buffer;
-			execData->addInt( val );
-			count_int++;
-			break;
-		    }
-
-		    case A_UVAL16:
-		    {
-			int *val = new int;
-			*val = (int)*(unsigned short*)value.buffer;
-			execData->addInt( val );
-			count_int++;
-			break;
-		    }
-			
-		    case A_VAL8:
-		    {
-			int *val = new int;
-			*val = (int)*(char *)value.buffer;
-			execData->addInt( val );
-			count_int++;
-			break;
-		    }
-			
-		    case A_UVAL8:
-		    {
-			int *val = new int;
-			*val = (int)*(unsigned char *)value.buffer;
-			execData->addInt( val );
-			count_int++;
-			break;
-		    }
-			
-		    case A_DOUBLE:
-		    {
-			double *val = new double;
-			*val = (double)*(double *)value.buffer;
-			execData->addNum( val );
-			count_num++;
-			break;
-		    }
-			
-                    default:
-			return false;
-		}
-		col_types.push_back( value.type );
 	    }
 	}
+	num_rows++;
     }
-    
+
+    // sqlany_fetch_next() also returns false when fetching a row fails, which
+    // must not be mistaken for the end of the result set
+    char buffer[SACAPI_ERROR_SIZE];
+    if( api.sqlany_error( conn, buffer, sizeof(buffer) ) < 0 ) {
+	getErrorMsg( conn, error_msg );
+	return false;
+    }
     return true;
+}
+
+Napi::Value ResultSet::toJS( Napi::Env env ) const
+/************************************************/
+{
+    if( rows_affected >= 0 ) {
+	return Napi::Number::New( env, rows_affected );
+    }
+    if( col_names.empty() ) {
+	return env.Undefined();
+    }
+
+    size_t num_cols = col_names.size();
+    std::vector<Napi::String> keys;
+    for( const std::string &name : col_names ) {
+	keys.push_back( Napi::String::New( env, name ) );
+    }
+
+    Napi::Array rows = Napi::Array::New( env, num_rows );
+    for( size_t r = 0; r < num_rows; r++ ) {
+	Napi::HandleScope scope( env );
+	Napi::Object row = Napi::Object::New( env );
+	for( size_t c = 0; c < num_cols; c++ ) {
+	    const Cell &cell = cells[r * num_cols + c];
+	    Napi::Value val;
+	    switch( cell.kind ) {
+		case Cell::Null:
+		    val = env.Null();
+		    break;
+		case Cell::Number:
+		    val = Napi::Number::New( env, cell.num );
+		    break;
+		case Cell::String:
+		    val = Napi::String::New( env, cell.bytes );
+		    break;
+		case Cell::Binary:
+		    val = Napi::Buffer<char>::Copy( env, cell.bytes.data(),
+						    cell.bytes.size() );
+		    break;
+	    }
+	    row.Set( keys[c], val );
+	}
+	rows.Set( (uint32_t)r, row );
+    }
+    return rows;
 }
 
 bool cleanAPI()
@@ -721,358 +461,248 @@ bool cleanAPI()
     return false;
 }
 
-// Generic Baton and Callback (After) Function
-// Use this if the function does not have any return values and
-// Does not take any parameters. 
-// Create custom Baton and Callback (After) functions otherwise
-
-void Connection::noParamAfter( uv_work_t *req )
-/*********************************************/
+class TaskWorker : public Napi::AsyncWorker
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope	scope(isolate);
-    noParamBaton *baton = static_cast<noParamBaton*>(req->data);
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
+  public:
+    TaskWorker( Napi::Object receiver, Napi::Function callback, Task *task )
+	: Napi::AsyncWorker( receiver, callback, "sqlanywhere" ), task( task ) {}
 
-    if( baton->err ) {
-	callBack( &( baton->error_msg ), baton->callback, undef,
-		  baton->callback_required );
-	return;
+    void keepAlive( Napi::Object obj ) {
+	refs.push_back( Napi::Persistent( obj ) );
     }
-    
-    callBack( NULL, baton->callback, undef, baton->callback_required );
-    
-    delete baton;
-    delete req;
+
+  protected:
+    void Execute() override {
+	task->execute();
+    }
+
+    void OnOK() override {
+	Napi::Env env = Env();
+	Napi::Value err = env.Undefined();
+	Napi::Value result = env.Undefined();
+	if( task->err ) {
+	    err = Napi::Error::New( env, task->error_msg ).Value();
+	} else {
+	    result = task->result( env );
+	}
+	try {
+	    Callback().Call( env.Global(), { err, result } );
+	} catch( const Napi::Error &e ) {
+	    // Report it as an uncaught exception, like node::FatalException()
+	    // did. Leaving it pending instead would rethrow it from any call
+	    // into this addon made by an 'uncaughtException' handler.
+	    napi_fatal_exception( env, e.Value() );
+	}
+    }
+
+  private:
+    std::unique_ptr<Task>		task;
+    std::vector<Napi::ObjectReference>	refs;
+};
+
+Napi::Value runTask( const Napi::CallbackInfo &		info,
+		     std::unique_ptr<Task>		task,
+		     Napi::Value			callback,
+		     std::initializer_list<Napi::Object> keep_alive )
+/*******************************************************************/
+{
+    Napi::Env env = info.Env();
+    if( !callback.IsFunction() ) {
+	task->execute();
+	if( task->err ) {
+	    throw Napi::Error::New( env, task->error_msg );
+	}
+	return task->result( env );
+    }
+
+    TaskWorker *worker = new TaskWorker( info.This().As<Napi::Object>(),
+					 callback.As<Napi::Function>(),
+					 task.release() );
+    for( const Napi::Object &obj : keep_alive ) {
+	worker->keepAlive( obj );
+    }
+    worker->Queue();
+    return env.Undefined();
 }
 
-
 // Stmt Object Functions
-StmtObject::StmtObject()
-/**********************/
+StmtObject::StmtObject( const Napi::CallbackInfo &info )
+/******************************************************/
+    : Napi::ObjectWrap<StmtObject>( info )
+    , connection( NULL )
+    , sqlany_stmt( NULL )
+    , wide_stmt( NULL )
 {
-    connection = NULL;
-    sqlany_stmt = NULL;
 }
 
 StmtObject::~StmtObject()
 /***********************/
 {
-    uv_mutex_t *mutex = NULL;
     if( connection != NULL ) {
-	mutex = &connection->conn_mutex;
-	uv_mutex_lock( mutex );
-    }
-
-    cleanup();
-    removeConnection();
-
-    if( mutex != NULL ) {
-	uv_mutex_unlock( mutex );
+	std::lock_guard<std::mutex> lock( connection->conn_mutex );
+	cleanup();
+	connection->removeStmt( this );
     }
 }
 
-Persistent<Function> StmtObject::constructor;
-
-void StmtObject::Init( Isolate *isolate )
-/***************************************/
+Napi::Function StmtObject::Init( Napi::Env env )
+/**********************************************/
 {
-    HandleScope	scope(isolate);
-    // Prepare constructor template
-    Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "StmtObject" ) );
-    tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
-
-    // Prototype
-    NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "drop", drop );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "getMoreResults", getMoreResults );
-    Local<Context> context = isolate->GetCurrentContext();
-    constructor.Reset( isolate, tpl->GetFunction( context ).ToLocalChecked() );
+    return DefineClass( env, "StmtObject", {
+	InstanceMethod<&StmtObject::exec>( "exec" ),
+	InstanceMethod<&StmtObject::drop>( "drop" ),
+	InstanceMethod<&StmtObject::getMoreResults>( "getMoreResults" ),
+    } );
 }
 
-void StmtObject::New( const FunctionCallbackInfo<Value> &args )
-/*************************************************************/
+Napi::Object StmtObject::NewInstance( Napi::Env env )
+/***************************************************/
 {
-    StmtObject* obj = new StmtObject();
-
-    obj->Wrap( args.This() );
-    args.GetReturnValue().Set( args.This() );
-}
-
-void StmtObject::NewInstance( const FunctionCallbackInfo<Value> &args )
-/*********************************************************************/
-{
-    Persistent<Object> obj;
-    CreateNewInstance( args, obj );
-    args.GetReturnValue().Set( obj );
-}
-
-void StmtObject::CreateNewInstance( const FunctionCallbackInfo<Value> &	args,
-				    Persistent<Object> &		obj )
-/***************************************************************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope	scope(isolate);
-    const unsigned argc = 1;
-    Local<Value> argv[argc] = { args[0] };
-    Local<Function>cons = Local<Function>::New( isolate, constructor );
-#if NODE_MAJOR_VERSION >= 10
-    Local<Context> env = isolate->GetCurrentContext();
-    MaybeLocal<Object> mlObj = cons->NewInstance( env, argc, argv );
-    Local<Object> instance = mlObj.ToLocalChecked();
-
-    obj.Reset( isolate, instance );
-#else
-    obj.Reset( isolate, cons->NewInstance( argc, argv ) );
-#endif
+    return env.GetInstanceData<AddonData>()->stmt_ctor.New( {} );
 }
 
 void StmtObject::cleanup( void )
 /******************************/
 {
+    // caller must hold the connection mutex
     if( sqlany_stmt != NULL ) {
 	api.sqlany_free_stmt( sqlany_stmt );
 	sqlany_stmt = NULL;
     }
-}
-
-void StmtObject::removeConnection( void )
-/***************************************/
-{
-    if( connection != NULL ) {
-	connection->removeStmt( this );
-    	connection = NULL;
+    if( wide_stmt != NULL ) {
+	api.sqlany_free_stmt( wide_stmt );
+	wide_stmt = NULL;
     }
 }
 
 // Connection Functions
 
-void HashToString( Isolate *isolate, Local<Object> obj, Persistent<String> &ret )
-/*************************************************************/
+std::string HashToString( Napi::Object obj )
+/******************************************/
 {
-    Local<Context> context = isolate->GetCurrentContext();
-    HandleScope	scope(isolate);
-    Local<Array> props = (obj->GetOwnPropertyNames(context)).ToLocalChecked();
-    int length = props->Length();
+    Napi::Env env = obj.Env();
+    napi_value names;
+    napi_status status = napi_get_all_property_names(
+	env, obj, napi_key_own_only,
+	(napi_key_filter)( napi_key_enumerable | napi_key_skip_symbols ),
+	napi_key_numbers_to_strings, &names );
+    if( status != napi_ok ) {
+	throw Napi::Error::New( env );
+    }
+    Napi::Array keys( env, names );
     std::string params = "";
-    bool	first = true;
-    for( int i = 0; i < length; i++ ) {
-	Local<String> key = props->Get(i).As<String>();
-	Local<String> val = obj->Get(key).As<String>();
-#if NODE_MAJOR_VERSION >= 12
-        String::Utf8Value key_utf8( isolate, key );
-        String::Utf8Value val_utf8( isolate, val );
-#else
-	String::Utf8Value key_utf8( key );
-	String::Utf8Value val_utf8( val );
-#endif
-	if( !first ) {
+    for( uint32_t i = 0; i < keys.Length(); i++ ) {
+	Napi::Value key = keys.Get( i );
+	if( i > 0 ) {
 	    params += ";";
 	}
-	first = false;
-	params += std::string(*key_utf8);
+	params += key.ToString().Utf8Value();
 	params += "=";
-	params += std::string(*val_utf8);
+	params += obj.Get( key ).ToString().Utf8Value();
     }
-    ret.Reset( isolate, String::NewFromUtf8( isolate, params.c_str() ) );
+    return params;
 }
 
-#if 0
-// Handy function for determining what type an object is.
-static void CheckArgType( Local<Value> &obj )
-/*******************************************/
+Connection::Connection( const Napi::CallbackInfo &info )
+/******************************************************/
+    : Napi::ObjectWrap<Connection>( info )
+    , conn( NULL )
+    , sqlca_connection( false )
 {
-    static const char *type = NULL;
-    if( obj->IsArray() ) {
-	type = "Array";
-    } else if( obj->IsBoolean() ) {
-	type = "Boolean";
-    } else if( obj->IsBooleanObject() ) {
-	type = "BooleanObject";
-    } else if( obj->IsDate() ) {
-	type = "Date";
-    } else if( obj->IsExternal() ) {
-	type = "External";
-    } else if( obj->IsFunction() ) {
-	type = "Function";
-    } else if( obj->IsInt32() ) {
-	type = "Int32";
-    } else if( obj->IsNativeError() ) {
-	type = "NativeError";
-    } else if( obj->IsNull() ) {
-	type = "Null";
-    } else if( obj->IsNumber() ) {
-	type = "Number";
-    } else if( obj->IsNumberObject() ) {
-	type = "NumberObject";
-    } else if( obj->IsObject() ) {
-	type = "Object";
-    } else if( obj->IsRegExp() ) {
-	type = "RegExp";
-    } else if( obj->IsString() ) {
-	type = "String";
-    } else if( obj->IsStringObject() ) {
-	type = "StringObject";
-    } else if( obj->IsUint32() ) {
-	type = "Uint32";
-    } else if( obj->IsUndefined() ) {
-	type = "Undefined";
-    } else {
-	type = "Unknown";
-    }
-}
-#endif
-
-Connection::Connection( const FunctionCallbackInfo<Value> &args )
-/***************************************************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    uv_mutex_init(&conn_mutex);
-    conn = NULL;
-
-    if( args.Length() > 1 ) {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	return;
+    if( info.Length() > 1 ) {
+	throwError( info.Env(), JS_ERR_INVALID_ARGUMENTS );
     }
 
-    if( args.Length() == 1 ) {
-	//CheckArgType( args[0] );
-	if( args[0]->IsString() ) {
-            Local<String> str = args[0]->ToString(isolate);
-#if NODE_MAJOR_VERSION >= 12
-            int string_len = str->Utf8Length(isolate);
-            char *buf = new char[string_len + 1];
-            str->WriteUtf8(isolate, buf);
-#else
-            int string_len = str->Utf8Length();
-            char *buf = new char[string_len+1];
-            str->WriteUtf8( buf );
-#endif
-            _arg.Reset( isolate, String::NewFromUtf8( isolate, buf ) );
-	    delete [] buf;
-	} else if( args[0]->IsObject() ) {
-            HashToString( isolate, args[0]->ToObject(isolate), _arg );
-	} else if( !args[0]->IsUndefined() && !args[0]->IsNull() ) {
-	    throwError( JS_ERR_INVALID_ARGUMENTS );
-	} else {
-	    _arg.Reset( isolate, String::NewFromUtf8( isolate, "" ) );
+    if( info.Length() == 1 ) {
+	if( info[0].IsString() ) {
+	    conn_arg = info[0].As<Napi::String>().Utf8Value();
+	} else if( info[0].IsObject() ) {
+	    conn_arg = HashToString( info[0].As<Napi::Object>() );
+	} else if( !info[0].IsUndefined() && !info[0].IsNull() ) {
+	    throwError( info.Env(), JS_ERR_INVALID_ARGUMENTS );
 	}
-    } else {
-	_arg.Reset( isolate, String::NewFromUtf8( isolate, "" ) );
     }
 }
-
 
 Connection::~Connection()
 /***********************/
 {
-    scoped_lock api_lock( api_mutex );
-    scoped_lock lock( conn_mutex );
+    std::lock_guard<std::mutex> api_lock( api_mutex );
+    std::lock_guard<std::mutex> lock( conn_mutex );
 
-    _arg.Reset();
-    cleanupStmts();
+    // Statement objects can outlive the connection object
+    for( StmtObject *stmt : statements ) {
+	stmt->cleanup();
+	stmt->connection = NULL;
+    }
+    statements.clear();
+
     if( conn != NULL ) {
-	api.sqlany_disconnect( conn );
+	if( !sqlca_connection ) {
+	    api.sqlany_disconnect( conn );
+	}
 	api.sqlany_free_connection( conn );
 	conn = NULL;
 	openConnections--;
     }
-    
+
     cleanAPI();
-};
+}
 
 void Connection::cleanupStmts( void )
 /***********************************/
 {
-    std::vector<void*>::iterator findit;
-    for( findit = statements.begin(); findit != statements.end(); findit++ ) {
-	StmtObject *s = reinterpret_cast<StmtObject*>(*findit);
-	s->cleanup();
+    // caller must hold conn_mutex
+    for( StmtObject *stmt : statements ) {
+	stmt->cleanup();
     }
 }
 
 void Connection::removeStmt( class StmtObject *stmt )
 /***************************************************/
 {
-    // caller must get mutex
-    std::vector<void*>::iterator findit;
-    for( findit = statements.begin(); findit != statements.end(); findit++ ) {
-	if( *findit == reinterpret_cast<void*>(stmt) ) {
-	    statements.erase( findit );
+    // caller must hold conn_mutex
+    for( auto it = statements.begin(); it != statements.end(); it++ ) {
+	if( *it == stmt ) {
+	    statements.erase( it );
 	    return;
 	}
     }
 }
 
-Persistent<Function> Connection::constructor;
-
-void Connection::Init( Isolate *isolate )
-/***************************************/
+Napi::Function Connection::Init( Napi::Env env )
+/**********************************************/
 {
-    HandleScope scope( isolate );
-    // Prepare constructor template
-    Local<FunctionTemplate> tpl = FunctionTemplate::New( isolate, New );
-    tpl->SetClassName( String::NewFromUtf8( isolate, "Connection" ) );
-    tpl->InstanceTemplate()->SetInternalFieldCount( 1 );
-    
-    // Prototype
-    NODE_SET_PROTOTYPE_METHOD( tpl, "exec", exec );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "prepare", prepare );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "connect", connect );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "disconnect", disconnect );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "close", disconnect );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "commit", commit );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "rollback", rollback );
-    NODE_SET_PROTOTYPE_METHOD( tpl, "connected", connected );
-
-    Local<Context> context = isolate->GetCurrentContext();
-    constructor.Reset(isolate, tpl->GetFunction(context).ToLocalChecked());
+    return DefineClass( env, "Connection", {
+	InstanceMethod<&Connection::exec>( "exec" ),
+	InstanceMethod<&Connection::prepare>( "prepare" ),
+	InstanceMethod<&Connection::connect>( "connect" ),
+	InstanceMethod<&Connection::disconnect>( "disconnect" ),
+	InstanceMethod<&Connection::disconnect>( "close" ),
+	InstanceMethod<&Connection::commit>( "commit" ),
+	InstanceMethod<&Connection::rollback>( "rollback" ),
+	InstanceMethod<&Connection::connected>( "connected" ),
+    } );
 }
 
-void Connection::New( const FunctionCallbackInfo<Value> &args )
+static Napi::Value CreateConnection( const Napi::CallbackInfo &info )
+/*******************************************************************/
+{
+    // Only the first argument is passed on, as before
+    return info.Env().GetInstanceData<AddonData>()->connection_ctor.New( { info[0] } );
+}
+
+static Napi::Object Init( Napi::Env env, Napi::Object exports )
 /*************************************************************/
 {
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
+    AddonData *data = new AddonData;
+    data->stmt_ctor = Napi::Persistent( StmtObject::Init( env ) );
+    data->connection_ctor = Napi::Persistent( Connection::Init( env ) );
+    env.SetInstanceData( data );
 
-    if( args.IsConstructCall() ) {
-	Connection *obj = new Connection( args );
-	obj->Wrap( args.This() );
-	args.GetReturnValue().Set( args.This() );
-    } else {
-	const int argc = 1;
-	Local<Value> argv[argc] = { args[0] };
-	Local<Function> cons = Local<Function>::New( isolate, constructor );
-#if NODE_MAJOR_VERSION >= 10
-        Local<Context> env = isolate->GetCurrentContext();
-        MaybeLocal<Object> mlObj = cons->NewInstance( env, argc, argv );
-        const Local<Object> obj = mlObj.ToLocalChecked();
-	args.GetReturnValue().Set( obj );
-#else
-	args.GetReturnValue().Set( cons->NewInstance( argc, argv ) );
-#endif
-    }
+    exports.Set( "createConnection",
+		 Napi::Function::New( env, CreateConnection, "createConnection" ) );
+    return exports;
 }
 
-void Connection::NewInstance( const FunctionCallbackInfo<Value> &args )
-/*********************************************************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    const unsigned argc = 1;
-    Local<Value> argv[argc] = { args[0] };
-
-    Local<Function> cons = Local<Function>::New( isolate, constructor );
-#if NODE_MAJOR_VERSION >= 10
-    Local<Context> env = isolate->GetCurrentContext();
-    MaybeLocal<Object> mlObj = cons->NewInstance( env, argc, argv );
-    Local<Object> instance = mlObj.ToLocalChecked();
-#else
-    Local<Object> instance = cons->NewInstance( argc, argv );
-#endif
-    args.GetReturnValue().Set( instance );
-}
-
-#endif // !v010
+NODE_API_MODULE( sqlanywhere, Init )

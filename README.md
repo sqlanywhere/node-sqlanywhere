@@ -1,5 +1,5 @@
 # node-sqlanywhere
-This is a Node.js driver written for [SAP SQL Anywhere](https://www.sap.com/products/sql-anywhere.html).
+This is a Node.js driver written for [SAP SQL Anywhere](http://www.sap.com/pc/tech/database/software/sybase-sql-anywhere/index.html).
 
 [![NPM](https://nodei.co/npm/sqlanywhere.png?compact=true)](https://nodei.co/npm/sqlanywhere/)
 
@@ -9,9 +9,13 @@ npm install sqlanywhere
 ```
 #### Prerequisites
 This driver communicates with the native SQL Anywhere libraries, and thus requires
-native compilation. Native compilation is managed by [`node-gyp`](https://github.com/TooTallNate/node-gyp/). Please see that project for additional prerequisites including Python and a C/C++ tool chain.
+native compilation. Native compilation is managed by [`node-gyp`](https://github.com/nodejs/node-gyp/). Please see that project for additional prerequisites including Python 3, and C/C++ tool chain.
 
-The official version hosted on NPM includes precompiled libraries for Windows (64-bit).
+The module is compiled by the package's install script. Newer npm versions ask you to approve dependency install scripts; allow this one with `npm install-scripts approve sqlanywhere`.
+
+Since version 2.0.0 the driver is built on [Node-API](https://nodejs.org/api/n-api.html), so a compiled module keeps working with newer Node.js versions without being rebuilt.
+
+At run time the driver loads the SQL Anywhere client library `libdbcapi_r.so` (Linux), `libdbcapi.dylib` (macOS) or `dbcapi.dll` (Windows). Run `sa_config.sh` from the SQL Anywhere installation (or set `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` yourself) so that it can be found. The library must match the architecture of the `node` binary: SQL Anywhere 17 for macOS is x86_64 only, so on Apple silicon use an x64 build of Node.js (it runs under Rosetta).
 
 Versions supported:
 
@@ -21,12 +25,16 @@ Versions supported:
 <tr><td>1.0.9</td><td>6.x, 7.x</td></tr>
 <tr><td>1.0.19</td><td>8.x</td></tr>
 <tr><td>1.0.22</td><td>9.x</td></tr>
-<tr><td>1.0.23</td><td>10.x</td></tr>
-<tr><td>1.0.24<td><b>Only</b> 5.x through 10.x (support for 0.10, 0.12, and 4.x is dropped)</td></tr>
-<tr><td>1.0.25<td>5.x through 12.x</td></tr>
-<tr><td>1.0.26<td>6.x through 12.x</td></tr>
-<tr><td>1.0.27<td>6.x through 12.x</td></tr>
+<tr><td>2.0.0</td><td>18 and later</td></tr>
 </table>
+
+#### Running the tests
+The tests need a running SQL Anywhere server:
+```
+dbsrv17 -n node_test -x "tcpip(port=2638)" demo.db
+SQLANY_TEST_CONN="Host=localhost:2638;ServerName=node_test;UID=DBA;PWD=sql" node --test test/*.test.js
+```
+On macOS run `node --test` directly rather than `npm test`: npm starts scripts with `/bin/sh`, which drops `DYLD_LIBRARY_PATH`.
 
 ## Getting Started
 
@@ -145,6 +153,10 @@ conn.exec("SELECT * FROM Test WHERE id BETWEEN ? AND ?", [5, 8], function (err, 
 });
 ```
 
+A placeholder without a value is bound as NULL, like a `null` value: `conn.exec("INSERT INTO Test VALUES ( ?, ? )", [1])` inserts NULL into the second column, and so does a statement executed without any values. Earlier versions left such parameters unbound; the server took them as NULL too, but then also inserted NULL for them in later INSERT statements on the connection that did have values, and could crash. Passing more values than there are placeholders is an error.
+
+Output parameters of procedures are not returned. A placeholder for an `OUT` parameter is never bound, so a value passed for it is ignored, and an `INOUT` parameter only passes its value into the procedure: `conn.exec("CALL MyProc( ?, ? )", [1, null])` calls `MyProc( IN a INT, OUT b INT )` with `a = 1`. Earlier versions crashed when such a placeholder had a value, and otherwise could call the procedure with NULL for its `IN` parameters. A `CALL` can't be executed for several rows at once, and a procedure that has `OUT` parameters and also returns a result set fails with error -182.
+
 As of version 1.0.16, wide inserts, deletes, and updates are possible by passing in an array of arrays, one per row. For example, the following statement inserts three rows rather than just one:
 
 ```js
@@ -154,7 +166,7 @@ conn.exec("INSERT INTO Test VALUES ( ?, ? )", [ [1, 10], [2, 20], [3, 30] ], fun
 });
 ```
 
-When using wide statements, each array must have the same number of elements and the type of the values must be the same in each row.
+When using wide statements, each array must have the same number of elements and the type of the values must be the same in each row, except that any value can be NULL. DBCAPI cannot send a column that mixes NULL and other values in one execution, so such a statement is executed one row at a time, which is slower. If a row fails, the rows before it are rolled back to a savepoint, just as a failing wide statement inserts nothing; with `auto_commit` on or `chained` off every row is committed, so they stay.
 
 ## Prepared Statement Execution
 #### Prepare a Statement
@@ -175,6 +187,8 @@ stmt.exec([16], function(err, rows) {
   console.log("Rows: ", rows);
 });
 ```
+
+A prepared statement that is executed with several rows at once is prepared a second time on the server for those executions, so it counts twice towards the limit of prepared statements per connection (the `max_statement_count` option).
 
 #### Fetching multiple result sets
 As of version 1.0.16, you can prepare and execute a batch containing multiple select statements. To do this, you would prepare the multiple select statements and use `stmt.exec()` to fetch the first result set. To fetch the next result set, call `stmt.getMoreResults()`. getMoreResults takes an optional callback function (which takes the same arguments as `exec`), making it asynchronous. The `getMoreResults()` function returns `undefined` (or passes it to the callback function) after the last result set.

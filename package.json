@@ -2,19 +2,20 @@
   "author": "SQL ANYWHERE",
   "name": "sqlanywhere",
   "description": "SQL Anywhere JavaScript Driver.",
-  "version": "1.0.27",
+  "version": "2.0.0",
   "repository": {
     "url": "https://github.com/sqlanywhere/node-sqlanywhere"
   },
   "main": "./lib/index",
   "engines": {
-    "node": ">=0.10"
+    "node": ">=18"
   },
+  "gypfile": true,
   "scripts": {
-    "install": "node build.js"
+    "install": "node-gyp rebuild",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "help": "^3.0.2",
-    "nan": "2.14.2"
+    "node-addon-api": "^8.9.2"
   }
 }

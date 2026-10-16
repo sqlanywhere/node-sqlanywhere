@@ -1,1285 +1,727 @@
 // ***************************************************************************
-// Copyright (c) 2021 SAP SE or an SAP affiliate company. All rights reserved.
+// Copyright (c) 2017 SAP SE or an SAP affiliate company. All rights reserved.
 // ***************************************************************************
-#include "nodever_cover.h"
+#include <stdint.h>
 #include "sqlany_utils.h"
 
-#if !v010
-
-using namespace v8;
-
 SQLAnywhereInterface api;
+std::atomic<unsigned> api_max_ver( 0 );
 unsigned openConnections = 0;
-uv_mutex_t api_mutex;
+std::mutex api_mutex;
 
-struct executeBaton {
-    Persistent<Function>		callback;
-    bool 				err;
-    std::string 			error_msg;
-    bool 				callback_required;
-    unsigned				num_rows;
+// Execute and fetch
 
-    Connection 				*obj;
-    StmtObject				*stmt_obj;
+class ExecuteTask : public Task {
+  public:
+    // stmt_obj is NULL when executing sql directly on the connection
+    ExecuteTask( Connection *obj, StmtObject *stmt_obj )
+	: obj( obj ), stmt_obj( stmt_obj ) {}
 
-    bool				free_stmt;
-    std::string				stmt;
-    std::vector<ExecuteData *>		execData;
-    std::vector<a_sqlany_bind_param> 	params;
-    
-    std::vector<char*> 			colNames;
-    int 				rows_affected;
-    std::vector<a_sqlany_data_type> 	col_types;
-
-    executeBaton() {
-	err = false;
-	callback_required = false;
-	obj = NULL;
-	stmt_obj = NULL;
-	rows_affected = -1;
-	free_stmt = false;
-	num_rows = 0;
+    // Returns 0 or the error code to report.
+    int setBindParameters( Napi::Value arg ) {
+	if( !arg.IsArray() ) {
+	    return 0;
+	}
+	if( !binds.parse( arg.As<Napi::Array>() ) ) {
+	    return JS_ERR_BINDING_PARAMETERS;
+	}
+	if( binds.num_rows > 1 && api_max_ver < SQLANY_API_VERSION_4 ) {
+	    // can't support wide inserts with older dbcapi
+	    return JS_ERR_NO_WIDE_STATEMENTS;
+	}
+	return 0;
     }
 
-    ~executeBaton() {
-	obj = NULL;
-	if( stmt_obj != NULL && free_stmt ) {
-	    delete stmt_obj;
-	    stmt_obj = NULL;
+    void execute() override {
+	std::lock_guard<std::mutex> lock( obj->conn_mutex );
+	a_sqlany_connection *conn = obj->conn;
+
+	if( conn == NULL ) {
+	    fail( JS_ERR_NOT_CONNECTED );
+	    return;
 	}
-	col_types.clear();
-	callback.Reset();
-	params.clear();
-	CLEAN_STRINGS( colNames );
-	CLEAN_PTRS( execData );
+
+	if( stmt_obj != NULL ) {
+	    a_sqlany_stmt *sqlany_stmt = stmt_obj->sqlany_stmt;
+	    if( sqlany_stmt == NULL ) {
+		fail( JS_ERR_INVALID_OBJECT );
+		return;
+	    }
+	    run( conn, sqlany_stmt );
+	    return;
+	}
+
+	if( sql.length() == 0 ) {
+	    fail( JS_ERR_INVALID_OBJECT );
+	    return;
+	}
+	a_sqlany_stmt *sqlany_stmt = api.sqlany_prepare( conn, sql.c_str() );
+	if( sqlany_stmt == NULL ) {
+	    fail( conn );
+	    return;
+	}
+	run( conn, sqlany_stmt );
+	api.sqlany_free_stmt( sqlany_stmt );
+    }
+
+    Napi::Value result( Napi::Env env ) override {
+	return results.toJS( env );
+    }
+
+    std::string		sql;
+
+  protected:
+    Connection		*obj;
+    StmtObject		*stmt_obj;
+    BindParams		binds;
+    ResultSet		results;
+
+  private:
+    void run( a_sqlany_connection *conn, a_sqlany_stmt *sqlany_stmt ) {
+	// The server takes a parameter left unbound as NULL, but then keeps
+	// it NULL in later executions on the connection, even of other
+	// statements, and can crash. So missing values are bound as NULL.
+	// This also binds every input parameter again, as statements are not
+	// reset and would otherwise keep bindings to freed buffers.
+	int num_params = api.sqlany_num_params( sqlany_stmt );
+	if( num_params > 0 ) {
+	    binds.addNulls( num_params );
+	}
+
+	// DBCAPI fails to execute several rows of a statement with a result set
+	bool wide = binds.num_rows > 1 && api.sqlany_num_cols( sqlany_stmt ) == 0;
+	if( wide && binds.mixed_nulls ) {
+	    runRowByRow( conn, sqlany_stmt );
+	    return;
+	}
+	// Even when it fails, so that sqlany_stmt only ever runs single rows
+	if( binds.num_rows > 1 && stmt_obj != NULL ) {
+	    runWide( conn );
+	    return;
+	}
+	if( executeRows( conn, sqlany_stmt, 0, binds.num_rows ) &&
+	    !results.fetch( conn, sqlany_stmt, error_msg ) ) {
+	    err = true;
+	}
+    }
+
+    // Executes all rows on the wide handle of the prepared statement.
+    void runWide( a_sqlany_connection *conn ) {
+	a_sqlany_stmt *wide_stmt = stmt_obj->wide_stmt;
+	if( wide_stmt == NULL ) {
+	    wide_stmt = api.sqlany_prepare( conn, stmt_obj->sql.c_str() );
+	    if( wide_stmt == NULL ) {
+		fail( conn );
+		return;
+	    }
+	    stmt_obj->wide_stmt = wide_stmt;
+	}
+
+	// The batch size goes first, so that DBCAPI never takes the new
+	// parameters for as many rows as an earlier execution had
+	if( !api.sqlany_set_batch_size( wide_stmt, binds.num_rows ) ||
+	    !bindParams( wide_stmt, 0 ) ) {
+	    fail( conn );
+	    return;
+	}
+	if( !api.sqlany_execute( wide_stmt ) ) {
+	    fail( conn );
+	    return;
+	}
+	if( !results.fetch( conn, wide_stmt, error_msg ) ) {
+	    err = true;
+	}
+    }
+
+    // DBCAPI binds NULL with a different type than other values, which the
+    // server rejects in a multi-row execution (error -700), so the rows are
+    // executed one at a time. Rolling back to the savepoint undoes the
+    // earlier rows if one fails, as a failing multi-row execution is
+    // undone. A commit by auto_commit or unchained mode releases the
+    // savepoint, so errors about it not existing are ignored.
+    void runRowByRow( a_sqlany_connection *conn, a_sqlany_stmt *sqlany_stmt ) {
+	if( !api.sqlany_execute_immediate( conn, "SAVEPOINT" ) ) {
+	    fail( conn );
+	    return;
+	}
+	int affected = 0;
+	for( unsigned row = 0; row < binds.num_rows; row++ ) {
+	    if( !executeRows( conn, sqlany_stmt, row, 1 ) ) {
+		api.sqlany_execute_immediate( conn, "ROLLBACK TO SAVEPOINT" );
+		return;
+	    }
+	    int rows = api.sqlany_affected_rows( sqlany_stmt );
+	    if( rows > 0 ) {
+		affected += rows;
+	    }
+	}
+	api.sqlany_execute_immediate( conn, "RELEASE SAVEPOINT" );
+	results.setAffectedRows( affected );
+    }
+
+    // Executes the statement with num_rows rows of bind parameters from row
+    // first on. On failure sets the error and returns false. Several rows are
+    // only executed on a statement that is used once.
+    bool executeRows( a_sqlany_connection *conn, a_sqlany_stmt *sqlany_stmt,
+		      unsigned first, unsigned num_rows ) {
+	// The statement is not reset: after sqlany_reset(), DBCAPI describes
+	// the IN parameters of a CALL that also has OUT parameters as OUT
+	// ones, so their values would be lost or crash it
+	if( !bindParams( sqlany_stmt, first ) ) {
+	    fail( conn );
+	    return false;
+	}
+
+	if( num_rows > 1 && !api.sqlany_set_batch_size( sqlany_stmt, num_rows ) ) {
+	    fail( conn );
+	    return false;
+	}
+
+	if( !api.sqlany_execute( sqlany_stmt ) ) {
+	    fail( conn );
+	    return false;
+	}
+	return true;
+    }
+
+    // Binds the parameters of the rows from row first on. Returns false on
+    // failure, leaving the error with the connection.
+    bool bindParams( a_sqlany_stmt *sqlany_stmt, unsigned first ) {
+	for( unsigned int i = 0; i < binds.params.size(); i++ ) {
+	    a_sqlany_bind_param 	param;
+
+	    if( !api.sqlany_describe_bind_param( sqlany_stmt, i, &param ) ) {
+		return false;
+	    }
+
+	    // Output of procedures is not returned, and DBCAPI would write it
+	    // into the buffers of the values. So an OUT parameter is never
+	    // bound, ignoring its value, and an INOUT one only passes its value
+	    // in. Never binding it also keeps a statement that is not reset
+	    // from writing into the buffers of an earlier execution.
+	    if( param.direction == DD_OUTPUT ) {
+		continue;
+	    }
+	    param.direction = DD_INPUT;
+	    param.value = binds.rowValue( i, first );
+
+	    if( !api.sqlany_bind_param( sqlany_stmt, i, &param ) ) {
+		return false;
+	    }
+	}
+	return true;
     }
 };
 
-static bool fillResult( executeBaton *baton, Persistent<Value> &ResultSet )
-/*************************************************************************/
+class GetMoreResultsTask : public ExecuteTask {
+  public:
+    GetMoreResultsTask( Connection *obj, StmtObject *stmt_obj )
+	: ExecuteTask( obj, stmt_obj ) {}
+
+    void execute() override {
+	std::lock_guard<std::mutex> lock( obj->conn_mutex );
+	a_sqlany_connection *conn = obj->conn;
+
+	if( conn == NULL ) {
+	    fail( JS_ERR_NOT_CONNECTED );
+	    return;
+	}
+
+	a_sqlany_stmt *sqlany_stmt = stmt_obj->sqlany_stmt;
+	if( sqlany_stmt == NULL ) {
+	    fail( JS_ERR_INVALID_OBJECT );
+	    return;
+	}
+
+	if( !api.sqlany_get_next_result( sqlany_stmt ) ) {
+	    char buffer[SACAPI_ERROR_SIZE];
+	    if( api.sqlany_error( conn, buffer, sizeof(buffer) ) != 105 ) {
+		// 105 means "procedure has completed" - i.e. no more result
+		// sets. Just return undefined, not an error
+		fail( conn );
+	    }
+	    return;
+	}
+
+	if( !results.fetch( conn, sqlany_stmt, error_msg ) ) {
+	    err = true;
+	}
+    }
+};
+
+// Checks the arguments of Statement::exec() and Statement::getMoreResults().
+// Returns the connection object to keep alive while the statement runs.
+static Napi::Object checkStmt( Napi::Env env, StmtObject *stmt, Napi::Value callback,
+			       bool &ok )
+/*************************************************************************************/
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
+    ok = false;
+    if( stmt->connection == NULL || stmt->connection->conn == NULL ||
+	stmt->sqlany_stmt == NULL ) {
+	reportError( env, JS_ERR_INVALID_OBJECT, callback );
+	return Napi::Object();
+    }
+    // Empty if the connection object has been garbage collected but not freed yet
+    Napi::Object conn_obj = stmt->connection->Value();
+    if( conn_obj.IsEmpty() ) {
+	reportError( env, JS_ERR_INVALID_OBJECT, callback );
+	return Napi::Object();
+    }
+    ok = true;
+    return conn_obj;
+}
 
-    if( baton->err ) {
-	callBack( &( baton->error_msg ), baton->callback, undef,
-		  baton->callback_required );
+Napi::Value StmtObject::exec( const Napi::CallbackInfo &info )
+/************************************************************/
+{
+    Napi::Env env = info.Env();
+    size_t num_args = info.Length();
+    Napi::Value params = env.Undefined();
+    Napi::Value callback = env.Undefined();
+
+    if( num_args == 0 ) {
+
+    } else if( num_args == 1 && info[0].IsArray() ) {
+	params = info[0];
+
+    } else if( num_args == 1 && info[0].IsFunction() ) {
+	callback = info[0];
+
+    } else if( num_args == 2 && info[0].IsArray() && info[1].IsFunction() ) {
+	params = info[0];
+	callback = info[1];
+
+    } else {
+	throwError( env, JS_ERR_INVALID_ARGUMENTS );
+    }
+
+    bool ok;
+    Napi::Object conn_obj = checkStmt( env, this, callback, ok );
+    if( !ok ) {
+	return env.Undefined();
+    }
+
+    std::unique_ptr<ExecuteTask> task( new ExecuteTask( connection, this ) );
+    int code = task->setBindParameters( params );
+    if( code != 0 ) {
+	return reportError( env, code, callback );
+    }
+    return runTask( info, std::move( task ), callback, { conn_obj } );
+}
+
+Napi::Value StmtObject::getMoreResults( const Napi::CallbackInfo &info )
+/**********************************************************************/
+{
+    Napi::Env env = info.Env();
+    size_t num_args = info.Length();
+    Napi::Value callback = env.Undefined();
+
+    if( num_args == 0 ) {
+
+    } else if( num_args == 1 && info[0].IsFunction() ) {
+	callback = info[0];
+
+    } else {
+	throwError( env, JS_ERR_INVALID_ARGUMENTS );
+    }
+
+    bool ok;
+    Napi::Object conn_obj = checkStmt( env, this, callback, ok );
+    if( !ok ) {
+	return env.Undefined();
+    }
+
+    std::unique_ptr<Task> task( new GetMoreResultsTask( connection, this ) );
+    return runTask( info, std::move( task ), callback, { conn_obj } );
+}
+
+Napi::Value Connection::exec( const Napi::CallbackInfo &info )
+/************************************************************/
+{
+    Napi::Env env = info.Env();
+    size_t num_args = info.Length();
+    Napi::Value params = env.Undefined();
+    Napi::Value callback = env.Undefined();
+
+    if( num_args >= 1 && info[0].IsString() ) {
+	if( num_args == 1 ) {
+
+	} else if( num_args == 2 && info[1].IsArray() ) {
+	    params = info[1];
+
+	} else if( num_args == 2 && info[1].IsFunction() ) {
+	    callback = info[1];
+
+	} else if( num_args == 3 && info[1].IsArray() && info[2].IsFunction() ) {
+	    params = info[1];
+	    callback = info[2];
+
+	} else {
+	    throwError( env, JS_ERR_INVALID_ARGUMENTS );
+	}
+    } else {
+	throwError( env, JS_ERR_INVALID_ARGUMENTS );
+    }
+
+    if( conn == NULL ) {
+	return reportError( env, JS_ERR_INVALID_OBJECT, callback );
+    }
+
+    std::unique_ptr<ExecuteTask> task( new ExecuteTask( this, NULL ) );
+    task->sql = info[0].As<Napi::String>().Utf8Value();
+    int code = task->setBindParameters( params );
+    if( code != 0 ) {
+	return reportError( env, code, callback );
+    }
+    return runTask( info, std::move( task ), callback );
+}
+
+// Prepare
+
+class PrepareTask : public Task {
+  public:
+    PrepareTask( Connection *obj, StmtObject *stmt_obj )
+	: obj( obj ), stmt_obj( stmt_obj ) {}
+
+    void execute() override {
+	std::lock_guard<std::mutex> lock( obj->conn_mutex );
+	a_sqlany_connection *conn = obj->conn;
+
+	if( conn == NULL ) {
+	    fail( JS_ERR_INVALID_OBJECT );
+	    return;
+	}
+
+	a_sqlany_stmt *sqlany_stmt = api.sqlany_prepare( conn, stmt_obj->sql.c_str() );
+	if( sqlany_stmt == NULL ) {
+	    fail( conn );
+	    return;
+	}
+	stmt_obj->sqlany_stmt = sqlany_stmt;
+    }
+
+    Napi::Value result( Napi::Env env ) override {
+	return stmt_obj->Value();
+    }
+
+  private:
+    Connection		*obj;
+    StmtObject		*stmt_obj;
+};
+
+Napi::Value Connection::prepare( const Napi::CallbackInfo &info )
+/***************************************************************/
+{
+    Napi::Env env = info.Env();
+    Napi::Value callback = env.Undefined();
+
+    if( info.Length() == 1 && info[0].IsString() ) {
+	// do nothing
+    } else if( info.Length() == 2 && info[0].IsString() && info[1].IsFunction() ) {
+	callback = info[1];
+    } else {
+	throwError( env, JS_ERR_INVALID_ARGUMENTS );
+    }
+
+    if( conn == NULL ) {
+	return reportError( env, JS_ERR_NOT_CONNECTED, callback );
+    }
+
+    Napi::Object stmt = StmtObject::NewInstance( env );
+    StmtObject *obj = StmtObject::Unwrap( stmt );
+    obj->connection = this;
+    obj->sql = info[0].As<Napi::String>().Utf8Value();
+    {
+	std::lock_guard<std::mutex> lock( conn_mutex );
+	statements.push_back( obj );
+    }
+
+    std::unique_ptr<Task> task( new PrepareTask( this, obj ) );
+    return runTask( info, std::move( task ), callback, { stmt } );
+}
+
+// Connect and disconnect
+
+// Loads and initializes DBCAPI unless that is done already; caller holds
+// api_mutex.
+static bool initAPI()
+/*******************/
+{
+    if( api.initialized ) {
+	return true;
+    }
+    if( !sqlany_initialize_interface( &api, NULL ) ) {
 	return false;
     }
 
-    // We don't support wide fetches
-    if( !getResultSet( ResultSet, baton->rows_affected, baton->colNames,
-		       baton->execData[0], baton->col_types ) ) {
-	getErrorMsg( JS_ERR_RESULTSET, baton->error_msg );
-	callBack( &( baton->error_msg ), baton->callback, undef,
-		  baton->callback_required );
-	return false;
+    unsigned max_ver = 0;
+    if( !api.sqlany_init( "Node.js", SQLANY_API_VERSION_4, &max_ver ) ) {
+	// As long as the version is >= 2, we're OK. We just have to disable
+	// wide inserts
+	if( max_ver < SQLANY_API_VERSION_2 ||
+	    !api.sqlany_init( "Node.js", max_ver, &max_ver ) ) {
+	    sqlany_finalize_interface( &api );
+	    return false;
+	}
     }
-    if( baton->callback_required ) {
-	callBack( NULL, baton->callback, ResultSet, baton->callback_required );
-    }
+    api_max_ver = max_ver;
     return true;
 }
 
-void executeWork( uv_work_t *req )
-/********************************/
-{
-    int rc = 0;
-    int sqlcode = 0;
+class ConnectTask : public Task {
+  public:
+    ConnectTask( Connection *obj ) : obj( obj ) {}
 
-    executeBaton *baton = static_cast<executeBaton*>(req->data);
-    scoped_lock lock( baton->obj->conn_mutex );
+    void execute() override {
+	std::lock_guard<std::mutex> api_lock( api_mutex );
+	std::lock_guard<std::mutex> lock( obj->conn_mutex );
 
-    if( baton->obj->conn == NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_NOT_CONNECTED, baton->error_msg );
-	return;
-    }
-    
-    a_sqlany_stmt *sqlany_stmt = NULL;
-    if( baton->stmt_obj == NULL ) {
-	baton->stmt_obj = new StmtObject();
-	baton->stmt_obj->connection = baton->obj;
-	baton->obj->statements.push_back( baton->stmt_obj );
-    } else {
-	sqlany_stmt = baton->stmt_obj->sqlany_stmt;
-    }
-
-    if( sqlany_stmt == NULL && baton->stmt.length() > 0 ) {
-	sqlany_stmt = api.sqlany_prepare( baton->obj->conn,
-					  baton->stmt.c_str() );
-	if( sqlany_stmt == NULL ) {
-	    baton->err = true;
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
-	    return;
-	}
-	baton->stmt_obj->sqlany_stmt = sqlany_stmt;
-
-    } else if( sqlany_stmt == NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_INVALID_OBJECT, baton->error_msg );
-	return;
-    }
-    
-    if( !api.sqlany_reset( sqlany_stmt ) ) {
-	baton->err = true;
-	getErrorMsg( baton->obj->conn, baton->error_msg );
-	return;
-    }
-
-    for( unsigned int i = 0; i < baton->params.size(); i++ ) {
-	a_sqlany_bind_param 	param;
-	
-	if( !api.sqlany_describe_bind_param( sqlany_stmt, i, &param ) ) {
-	    baton->err = true;
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
+	if( obj->conn != NULL ) {
+	    fail( JS_ERR_CONNECTION_ALREADY_EXISTS );
 	    return;
 	}
 
-        memcpy( &param.value, &baton->params[i].value, sizeof( param.value ) );
-
-	if( !api.sqlany_bind_param( sqlany_stmt, i, &param ) ) {
-	    baton->err = true;
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
+	if( !initAPI() ) {
+	    fail( JS_ERR_INITIALIZING_DBCAPI );
 	    return;
 	}
-    }
 
-    if( baton->num_rows > 1 ) {
-	api.sqlany_set_batch_size( sqlany_stmt, baton->num_rows );
-    }
-    
-    sacapi_bool success_execute = api.sqlany_execute( sqlany_stmt );
-    baton->execData[0]->clear();
+	a_sqlany_connection *conn;
+	if( !sqlca_connection ) {
+	    conn = api.sqlany_new_connection();
+	    if( conn == NULL ) {
+		fail( JS_ERR_GENERAL_ERROR );
+		cleanAPI();
+		return;
+	    }
+	    if( !api.sqlany_connect( conn, conn_string.c_str() ) ) {
+		fail( conn );
+		api.sqlany_free_connection( conn );
+		cleanAPI();
+		return;
+	    }
 
-    if( !success_execute ) {
-	baton->err = true;
-	getErrorMsg( baton->obj->conn, baton->error_msg );
-	return;
-    }
-
-    rc = fetchResultSet( sqlany_stmt, baton->rows_affected, baton->colNames,
-		    baton->execData[0], baton->col_types );
-
-    if( !rc ) {
-	sqlcode = getError( baton->obj->conn, NULL, 0 );
-	if( (sqlcode != 0) && (sqlcode != 100) ) {
-	    baton->err = true;
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
-	    return;
-	}
-    }
-}
-
-void executeAfter( uv_work_t *req )
-/*********************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    executeBaton *baton = static_cast<executeBaton*>( req->data );
-    Persistent<Value> ResultSet;
-    fillResult( baton, ResultSet );
-    ResultSet.Reset();
-
-    delete baton;
-    delete req;
-}
-
-NODE_API_FUNC( StmtObject::exec )
-/*******************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    StmtObject *obj = ObjectWrap::Unwrap<StmtObject>( args.This() );
-    int num_args = args.Length();
-    bool callback_required = false, bind_required = false;
-    int cbfunc_arg = -1;
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-    
-    if( num_args == 0 ) {
-	
-    } else if( num_args == 1 && args[0]->IsArray() ) {
-	bind_required = true;
-
-    } else if( num_args == 1 && args[0]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 0;
-
-     } else if( num_args == 2 && args[0]->IsArray() && args[1]->IsFunction() ) {
-	callback_required = true;
-	bind_required = true;
-	cbfunc_arg = 1;
-
-    } else {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    if( obj == NULL || obj->connection == NULL || obj->connection->conn == NULL ||
-	obj->sqlany_stmt == NULL ) {
-	std::string error_msg;
-	getErrorMsg( JS_ERR_INVALID_OBJECT, error_msg );
-	callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    executeBaton *baton = new executeBaton();
-    baton->obj = obj->connection;
-    baton->stmt_obj = obj;
-    baton->free_stmt = false;
-    baton->callback_required = callback_required;
-
-    if( bind_required ) {
-        if( !getBindParameters( baton->execData, isolate, args[0], baton->params,
-				baton->num_rows ) ) {
-	    delete baton;
-	    std::string error_msg;
-	    getErrorMsg( JS_ERR_BINDING_PARAMETERS, error_msg );
-	    callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	    args.GetReturnValue().SetUndefined();
-	    return;
-	}
-	if( baton->num_rows > 1 &&
-	    baton->obj->max_api_ver < SQLANY_API_VERSION_4 ) {
-	    // can't support wide inserts with older dbcapi
-	    delete baton;
-	    std::string error_msg;
-	    getErrorMsg( JS_ERR_NO_WIDE_STATEMENTS, error_msg );
-	    callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	    args.GetReturnValue().SetUndefined();
-	    return;
-	}
-    } else {
-	baton->execData.push_back( new ExecuteData );
-	baton->num_rows = 1;
-    }
-
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, executeWork,
-				(uv_after_work_cb)executeAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    Persistent<Value> ResultSet;
-    
-    executeWork( req );
-    bool success = fillResult( baton, ResultSet );
-    delete baton;
-    delete req;
-    
-    if( !success ) {
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    args.GetReturnValue().Set( ResultSet );
-    ResultSet.Reset();
-}
-
-void getMoreResultsWork( uv_work_t *req )
-/***************************************/
-{
-    int rc = 0;
-    int sqlcode = 0;
-
-    executeBaton *baton = static_cast<executeBaton*>(req->data);
-    scoped_lock lock( baton->obj->conn_mutex );
-
-    if( baton->obj->conn == NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_NOT_CONNECTED, baton->error_msg );
-	return;
-    }
-
-    a_sqlany_stmt *stmt = baton->stmt_obj->sqlany_stmt;
-
-    if( stmt == NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_INVALID_OBJECT, baton->error_msg );
-	return;
-    }
-    int retval = ( api.sqlany_get_next_result( stmt ) != 0 );
-    if( !retval ) {
-	char buffer[SACAPI_ERROR_SIZE];
-	int rc;
-	rc = api.sqlany_error( baton->obj->conn, buffer, sizeof(buffer) );
-	if( rc != 105 ) {
-	    // rc == 105 means "procedure has completed" - i.e. no more result
-	    // sets. Just return null, not an error
-	    baton->err = true;
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
-	}
-	return;
-    }
-
-    baton->execData[0]->clear();
-    rc = fetchResultSet( stmt, baton->rows_affected, baton->colNames,
-		    baton->execData[0], baton->col_types );
-
-    if( !rc ) {
-	sqlcode = getError( baton->obj->conn, NULL, 0 );
-	if( (sqlcode != 0 ) && (sqlcode != 100) ) {
-	    baton->err = true;
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
-	    return;
-	}
-    }
-}
-
-void getMoreResultsAfter( uv_work_t *req )
-/****************************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    executeBaton *baton = static_cast<executeBaton*>( req->data );
-    Persistent<Value> ResultSet;
-    fillResult( baton, ResultSet );
-    ResultSet.Reset();
-
-    delete baton;
-    delete req;
-}
-
-NODE_API_FUNC( StmtObject::getMoreResults )
-/*****************************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    StmtObject *obj = ObjectWrap::Unwrap<StmtObject>( args.This() );
-    int num_args = args.Length();
-    bool callback_required = false;
-    int cbfunc_arg = -1;
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-    
-    if( num_args == 0 ) {
-	
-    } else if( num_args == 1 && args[0]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 0;
-
-    } else {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    if( obj == NULL || obj->connection == NULL || obj->connection->conn == NULL ||
-	obj->sqlany_stmt == NULL ) {
-	std::string error_msg;
-	getErrorMsg( JS_ERR_INVALID_OBJECT, error_msg );
-	callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-
-    executeBaton *baton = new executeBaton;
-    baton->obj = obj->connection;
-    baton->stmt_obj = obj;
-    baton->free_stmt = false;
-    baton->callback_required = callback_required;
-
-    baton->execData.push_back( new ExecuteData );
-    baton->num_rows = 1;
-
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, getMoreResultsWork,
-				(uv_after_work_cb)getMoreResultsAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    Persistent<Value> ResultSet;
-    
-    getMoreResultsWork( req );
-    bool success = fillResult( baton, ResultSet );
-    delete baton;
-    delete req;
-    
-    if( !success ) {
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    args.GetReturnValue().Set( ResultSet );
-    ResultSet.Reset();
-}
-
-NODE_API_FUNC( Connection::exec )
-/*******************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    Local<Context> context = isolate->GetCurrentContext();
-    HandleScope scope( isolate );
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-
-    int num_args = args.Length();
-    bool callback_required = false, bind_required = false;
-    int cbfunc_arg = 0;
-    if( args[0]->IsString() ) {
-	if( num_args == 1 ) {
-
-	} else if( num_args == 2 && args[1]->IsArray() ) {
-	    bind_required = true;
-	
-	} else if( num_args == 2 && args[1]->IsFunction() ) {
-	    callback_required = true;
-	    cbfunc_arg = 1;
-	    
-	} else if( num_args == 3 && args[1]->IsArray() && args[2]->IsFunction() ) {
-	    callback_required = true;
-	    bind_required = true;
-	    cbfunc_arg = 2;
-	
 	} else {
-	    throwError( JS_ERR_INVALID_ARGUMENTS );
-	    args.GetReturnValue().SetUndefined();
-	    return;
-	}
-    } else {
-        throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-
-    Connection *obj = ObjectWrap::Unwrap<Connection>( args.This() );
-    
-    if( obj == NULL || obj->conn == NULL ) {
-	std::string error_msg;
-	getErrorMsg( JS_ERR_INVALID_OBJECT, error_msg );
-	callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-#if NODE_MAJOR_VERSION >= 12
-    String::Utf8Value param0( isolate, (args[0]->ToString(context)).ToLocalChecked() );
-#else
-    String::Utf8Value param0( (args[0]->ToString(context)).ToLocalChecked() );
-#endif
-
-    executeBaton *baton = new executeBaton();
-    baton->obj = obj;
-    baton->callback_required = callback_required;
-    baton->free_stmt = true;
-    baton->stmt_obj = NULL;
-    baton->stmt = std::string(*param0);
-
-    if( bind_required ) {
-        if( !getBindParameters( baton->execData, isolate, args[1], baton->params,
-				baton->num_rows ) ) {
-	    delete baton;
-	    std::string error_msg;
-	    getErrorMsg( JS_ERR_BINDING_PARAMETERS, error_msg );
-	    callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	    args.GetReturnValue().SetUndefined();
-	    return;
-	}
-	if( baton->num_rows > 1 &&
-	    baton->obj->max_api_ver < SQLANY_API_VERSION_4 ) {
-	    // can't support wide inserts with older dbcapi
-	    delete baton;
-	    std::string error_msg;
-	    getErrorMsg( JS_ERR_NO_WIDE_STATEMENTS, error_msg );
-	    callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	    args.GetReturnValue().SetUndefined();
-	    return;
-	}
-    } else {
-	baton->execData.push_back( new ExecuteData );
-	baton->num_rows = 1;
-    }
-    
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, executeWork,
-				(uv_after_work_cb)executeAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    Persistent<Value> ResultSet;
-
-    executeWork( req );
-    bool success = fillResult( baton, ResultSet );
-
-    delete baton;
-    delete req;
-    
-    if( !success ) {
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    Local<Value> local_result = Local<Value>::New( isolate, ResultSet );
-    args.GetReturnValue().Set( local_result );
-    ResultSet.Reset();
-}
-
-struct prepareBaton {
-    Persistent<Function> 	callback;
-    bool 			err;
-    std::string 		error_msg;
-    bool 			callback_required;
-    
-    StmtObject 			*obj;
-    std::string 		stmt;
-    Persistent<Value> 		StmtObj;
-    
-    prepareBaton() {
-	err = false;
-	callback_required = false;
-	obj = NULL;
-    }
-    
-    ~prepareBaton() {
-	obj = NULL;
-	callback.Reset();
-	StmtObj.Reset();
-    }
-};
-
-void Connection::prepareWork( uv_work_t *req ) 
-/*********************************************/
-{
-    prepareBaton *baton = static_cast<prepareBaton*>(req->data);
-    if( baton->obj == NULL || baton->obj->connection == NULL || 
-	baton->obj->connection->conn == NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_INVALID_OBJECT, baton->error_msg );
-	return;
-    }
-    
-    scoped_lock lock( baton->obj->connection->conn_mutex );
-
-    baton->obj->sqlany_stmt = api.sqlany_prepare( baton->obj->connection->conn,
-						  baton->stmt.c_str() );
-    if( baton->obj->sqlany_stmt == NULL ) {
-	baton->err = true;
-	getErrorMsg( baton->obj->connection->conn, baton->error_msg );
-	return;
-    }
-}
-
-void Connection::prepareAfter( uv_work_t *req ) 
-/**********************************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    prepareBaton *baton = static_cast<prepareBaton*>(req->data);
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-    
-    if( baton->err ) {
-	callBack( &( baton->error_msg ), baton->callback, undef,
-		  baton->callback_required );
-	delete baton;
-	delete req;
-	return;
-    }
-    
-    if( baton->callback_required ) {
-	Local<Value> StmtObj = Local<Value>::New( isolate, baton->StmtObj );
-	callBack( NULL, baton->callback, StmtObj,  baton->callback_required );
-	baton->StmtObj.Reset();
-    }
-    
-    delete baton;
-    delete req;
-}
-
-NODE_API_FUNC( Connection::prepare )
-/**********************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    Local<Context> context = isolate->GetCurrentContext();
-    HandleScope scope( isolate );
-    bool callback_required = false;
-    int cbfunc_arg = -1;
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-
-    if( args.Length() == 1 && args[0]->IsString() ) {
-	// do nothing
-    } else if( args.Length() == 2 && args[0]->IsString() && args[1]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 1;
-    } else {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-        
-    Connection *db = ObjectWrap::Unwrap<Connection>( args.This() );
-    
-    if( db == NULL || db->conn == NULL ) {
-	std::string error_msg;
-	getErrorMsg( JS_ERR_NOT_CONNECTED, error_msg );
-	callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-
-    Persistent<Object> p_stmt;
-    StmtObject::CreateNewInstance( args, p_stmt );
-    Local<Object> l_stmt = Local<Object>::New( isolate, p_stmt );
-    StmtObject *obj = ObjectWrap::Unwrap<StmtObject>( l_stmt );
-    obj->connection = db;
-    {
-        scoped_lock	lock( db->conn_mutex );
-	db->statements.push_back( obj );
-    }
-
-    if( obj == NULL ) {
-        std::string error_msg;
-	getErrorMsg( JS_ERR_GENERAL_ERROR, error_msg );
-	callBack( &( error_msg ), args[cbfunc_arg], undef, callback_required );
-	args.GetReturnValue().SetUndefined();
-	p_stmt.Reset();
-	return;
-    }
-    
-#if NODE_MAJOR_VERSION >= 12
-    String::Utf8Value param0( isolate, (args[0]->ToString(context)).ToLocalChecked() );
-#else
-    String::Utf8Value param0( (args[0]->ToString(context)).ToLocalChecked() );
-#endif
-
-    prepareBaton *baton = new prepareBaton();
-    baton->obj = obj;
-    baton->callback_required = callback_required;    
-    baton->stmt =  std::string(*param0);
-    
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	baton->StmtObj.Reset( isolate, p_stmt );
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, prepareWork,
-				(uv_after_work_cb)prepareAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	p_stmt.Reset();
-	return;
-    }
-    
-    prepareWork( req );
-    bool err = baton->err;
-    prepareAfter( req );
-    
-    if( err ) {
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    args.GetReturnValue().Set( p_stmt );
-    p_stmt.Reset();
-}
-
-
-// Connect and disconnect
-// Connect Function
-struct connectBaton {
-    Persistent<Function> 	callback;
-    bool 			err;
-    std::string 		error_msg;
-    bool 			callback_required;
-    
-    Connection 			*obj;
-    bool 			sqlca_connection;
-    std::string 		conn_string;
-    void 			*sqlca;
-    
-    connectBaton() {
-	obj = NULL;
-	sqlca = NULL;
-	sqlca_connection = false;
-	err = false;
-	callback_required = false;
-    }
-    
-    ~connectBaton() {
-	obj = NULL;
-	sqlca = NULL;
-	callback.Reset();
-    }
-    
-};
-
-void Connection::connectWork( uv_work_t *req ) 
-/*********************************************/
-{
-    connectBaton *baton = static_cast<connectBaton*>(req->data);
-    scoped_lock api_lock( api_mutex );
-    scoped_lock lock( baton->obj->conn_mutex );
-    
-    if( baton->obj->conn != NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_CONNECTION_ALREADY_EXISTS, baton->error_msg );
-	return;
-    }
-    
-    if( api.initialized == false) {
-    
-	if( !sqlany_initialize_interface( &api, NULL ) ) {
-	    baton->err = true;
-	    getErrorMsg( JS_ERR_INITIALIZING_DBCAPI, baton->error_msg );
-	    return;
-	}
-    
-	if( !api.sqlany_init( "Node.js", SQLANY_API_VERSION_4,
-			      &(baton->obj->max_api_ver) )) {
-	    // As long as the version is >= 2, we're OK. We just have to disable
-	    // wide inserts
-	    if( baton->obj->max_api_ver >= SQLANY_API_VERSION_2 ) {
-		if( !api.sqlany_init( "Node.js", baton->obj->max_api_ver,
-				      &(baton->obj->max_api_ver) )) {
-		    baton->err = true;
-		    getErrorMsg( JS_ERR_INITIALIZING_DBCAPI, baton->error_msg );
-		    return;
-		}
-	    } else {
-		baton->err = true;
-		getErrorMsg( JS_ERR_INITIALIZING_DBCAPI, baton->error_msg );
+	    conn = api.sqlany_make_connection( sqlca );
+	    if( conn == NULL ) {
+		fail( JS_ERR_GENERAL_ERROR );
+		cleanAPI();
 		return;
 	    }
 	}
-    }
-    
-    if( !baton->sqlca_connection ) {
-	baton->obj->conn = api.sqlany_new_connection();
-	if( !api.sqlany_connect( baton->obj->conn, baton->conn_string.c_str() ) ) {
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
-	    baton->err = true;
-	    api.sqlany_free_connection( baton->obj->conn );
-	    baton->obj->conn = NULL;
-	    cleanAPI();
-	    return;
-	}
-	
-    } else {
-	baton->obj->conn = api.sqlany_make_connection( baton->sqlca );
-	if( baton->obj->conn == NULL ) {
-	    getErrorMsg( baton->obj->conn, baton->error_msg );
-	    cleanAPI();
-	    return;
-	}
-    } 
-    
-    baton->obj->sqlca_connection = baton->sqlca_connection;
-    openConnections++;
-}
 
-void Connection::connectAfter( uv_work_t *req ) 
-/**********************************************/
-{
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    connectBaton *baton = static_cast<connectBaton*>(req->data);
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-    
-    if( baton->err ) {
-	callBack( &( baton->error_msg ), baton->callback, undef,
-		  baton->callback_required );
-	delete baton;
-	delete req;
-	return;
-    }
-    
-    callBack( NULL, baton->callback, undef, baton->callback_required );
-    
-    delete baton;
-    delete req;
-}
-
-NODE_API_FUNC( Connection::connect )
-/**********************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    Local<Context> context = isolate->GetCurrentContext();
-    HandleScope scope( isolate );
-    int		num_args = args.Length();
-    Connection *obj;
-    obj = ObjectWrap::Unwrap<Connection>( args.This() );     
-    bool	sqlca_connection = false;
-    bool	callback_required = false;
-    int		cbfunc_arg = -1;
-    bool	arg_is_string = true;
-    bool	arg_is_object = false;
-
-    if( num_args == 0 ) {
-	arg_is_string = false;
-
-    } else if( num_args == 1 && args[0]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 0;
-	arg_is_string = false;
-
-    } else if( num_args == 1 && args[0]->IsNumber() ){
-	sqlca_connection = true;
-	
-    } else if( num_args == 1 && args[0]->IsString() ) {
-	sqlca_connection = false;
-    
-    } else if( num_args == 1 && args[0]->IsObject() ) {
-	sqlca_connection = false;
-	arg_is_string = false;
-	arg_is_object = true;
-    
-    } else if( num_args == 2 && args[0]->IsNumber() && args[1]->IsFunction() ) {
-	sqlca_connection = true;
-	callback_required = true;
-	cbfunc_arg = 1;
-    
-    } else if( num_args == 2 && args[0]->IsString() && args[1]->IsFunction() ) {
-	sqlca_connection = false;
-	callback_required = true;
-	cbfunc_arg = 1;
-    
-    } else if( num_args == 2 && args[0]->IsObject() && args[1]->IsFunction() ) {
-	sqlca_connection = false;
-	callback_required = true;
-	cbfunc_arg = 1;
-	arg_is_string = false;
-	arg_is_object = true;
-
-    } else if( num_args > 1 ) {
-        throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    connectBaton *baton = new connectBaton();
-    baton->obj = obj;
-    baton->callback_required = callback_required;
-
-    baton->sqlca_connection = sqlca_connection;
-    
-    if( sqlca_connection ) {
-        baton->sqlca = (void *)(long)(args[0]->NumberValue(context)).FromJust();
-	
-    } else {
-	Local<String> localArg = Local<String>::New( isolate, obj->_arg );
-	if( localArg->Length() > 0 ) {
-#if NODE_MAJOR_VERSION >= 12
-            String::Utf8Value param0( isolate, localArg );
-#else
-            String::Utf8Value param0( localArg );
-#endif
-	    baton->conn_string = std::string(*param0);
-	} else {
-	    baton->conn_string = std::string();
-	}
-	if( arg_is_string ) {
-#if NODE_MAJOR_VERSION >= 12
-            String::Utf8Value param0( isolate, (args[0]->ToString(context)).ToLocalChecked());
-#else
-            String::Utf8Value param0( (args[0]->ToString(context)).ToLocalChecked() );
-#endif
-	    baton->conn_string.append( ";" );
-	    baton->conn_string.append(*param0);
-	} else if( arg_is_object ) {
-	    Persistent<String> arg_string;
-            HashToString( isolate, args[0]->ToObject(isolate), arg_string );
-	    Local<String> local_arg_string = 
-		Local<String>::New( isolate, arg_string );
-#if NODE_MAJOR_VERSION >= 12
-            String::Utf8Value param0( isolate, local_arg_string );
-#else
-            String::Utf8Value param0( local_arg_string );
-#endif
-            baton->conn_string.append( ";" );
-	    baton->conn_string.append(*param0);
-	    arg_string.Reset();
-	}
-	baton->conn_string.append( ";CHARSET='UTF-8'" );
-    }
-    
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, connectWork,
-				(uv_after_work_cb)connectAfter );
-	assert(status == 0);
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    connectWork( req );
-    connectAfter( req );
-    args.GetReturnValue().SetUndefined();
-    return;
-}
-
-// Disconnect Function
-void Connection::disconnectWork( uv_work_t *req ) 
-/************************************************/
-{
-    noParamBaton *baton = static_cast<noParamBaton*>(req->data);
-    scoped_lock api_lock(api_mutex );
-    scoped_lock lock( baton->obj->conn_mutex );
-    
-    if( baton->obj->conn == NULL ) {
-	getErrorMsg( JS_ERR_NOT_CONNECTED, baton->error_msg );
-	return;
+	obj->sqlca_connection = sqlca_connection;
+	obj->conn = conn;
+	openConnections++;
     }
 
-    baton->obj->cleanupStmts();
+    bool		sqlca_connection = false;
+    std::string		conn_string;
+    void		*sqlca = NULL;
 
-    if( !baton->obj->sqlca_connection ) {
-	api.sqlany_disconnect( baton->obj->conn );
-    }
-    // Must free the connection object or there will be a memory leak 
-    api.sqlany_free_connection( baton->obj->conn );
-    baton->obj->conn = NULL;
-    openConnections--;
-
-    if( openConnections <= 0 ) {	
-	openConnections = 0;
-	cleanAPI();
-    }
-    
-    return;
-}
-
-NODE_API_FUNC( Connection::disconnect )
-/*************************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    int num_args = args.Length();
-    bool callback_required = false;
-    int cbfunc_arg = -1;
-    
-    if( num_args == 0 ) {
-	
-    } else if( num_args == 1 && args[0]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 0;
-	
-    } else {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    Connection *obj = ObjectWrap::Unwrap<Connection>( args.This() );
-    noParamBaton *baton = new noParamBaton();
-    
-    baton->callback_required = callback_required;
-    baton->obj = obj;
-    
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, disconnectWork,
-				(uv_after_work_cb)noParamAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    disconnectWork( req );
-    noParamAfter( req );
-    args.GetReturnValue().SetUndefined();
-    return;
-}
-
-void Connection::commitWork( uv_work_t *req ) 
-/********************************************/
-{
-    noParamBaton *baton = static_cast<noParamBaton*>(req->data);
-    scoped_lock lock( baton->obj->conn_mutex );
-    
-    if( baton->obj->conn == NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_NOT_CONNECTED, baton->error_msg );
-	return;
-    }
-
-    if( !api.sqlany_commit( baton->obj->conn ) ) {
-	baton->err = true;
-	getErrorMsg( baton->obj->conn, baton->error_msg );
-	return;
-    }
-}
-
-NODE_API_FUNC( Connection::commit )
-/*********************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    int num_args = args.Length();
-    bool callback_required = false;
-    int cbfunc_arg = -1;
-    
-    if( num_args == 0 ) {
-	
-    } else if( num_args == 1 && args[0]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 0;
-	
-    } else {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    Connection *obj = ObjectWrap::Unwrap<Connection>( args.This() );
-    
-    noParamBaton *baton = new noParamBaton();
-    baton->obj = obj;
-    baton->callback_required = callback_required;
-    
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, commitWork, 
-				(uv_after_work_cb)noParamAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    commitWork( req );
-    noParamAfter( req );
-    args.GetReturnValue().SetUndefined();
-    return;
-}
-
-void Connection::rollbackWork( uv_work_t *req ) 
-/**********************************************/
-{
-    noParamBaton *baton = static_cast<noParamBaton*>(req->data);
-    scoped_lock lock( baton->obj->conn_mutex );
-
-    if( baton->obj->conn == NULL ) {
-	baton->err = true;
-	getErrorMsg( JS_ERR_NOT_CONNECTED, baton->error_msg );
-	return;
-    }
-
-    if( !api.sqlany_rollback( baton->obj->conn ) ) {
-	baton->err = true;
-	getErrorMsg( baton->obj->conn, baton->error_msg );
-	return;
-    }
-}
-
-NODE_API_FUNC( Connection::rollback )
-/***********************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    int num_args = args.Length();
-    bool callback_required = false;
-    int cbfunc_arg = -1;
-    
-    if( num_args == 0 ) {
-	
-    } else if( num_args == 1 && args[0]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 0;
-	
-    } else {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    Connection *obj = ObjectWrap::Unwrap<Connection>( args.This() );
-
-    noParamBaton *baton = new noParamBaton();
-    baton->obj = obj;
-    baton->callback_required = callback_required;
-    
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, rollbackWork,
-				(uv_after_work_cb)noParamAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    rollbackWork( req );
-    noParamAfter( req );
-    args.GetReturnValue().SetUndefined();
-    return;
-}
-
-NODE_API_FUNC( Connection::connected )
-/************************************/
-{
-    Connection *obj = ObjectWrap::Unwrap<Connection>( args.This() );
-    args.GetReturnValue().Set( obj->conn == NULL ? false : true );
-}
-
-struct dropBaton {
-    Persistent<Function> 	callback;
-    bool 			err;
-    std::string 		error_msg;
-    bool 			callback_required;
-    
-    StmtObject 			*obj;  
-    
-    dropBaton() {
-	err = false;
-	callback_required = false;
-	obj = NULL;
-    }
-    
-    ~dropBaton() {
-	obj = NULL;
-	callback.Reset();
-    }
+  private:
+    Connection		*obj;
 };
 
-void StmtObject::dropAfter( uv_work_t *req ) 
-/*******************************************/
+Napi::Value Connection::connect( const Napi::CallbackInfo &info )
+/***************************************************************/
 {
-    Isolate *isolate = Isolate::GetCurrent();
-    HandleScope scope( isolate );
-    dropBaton *baton = static_cast<dropBaton*>(req->data);
-    Local<Value> undef = Local<Value>::New( isolate, Undefined( isolate ) );
-    
-    if( baton->err ) {
-	callBack( &( baton->error_msg ), baton->callback, undef,
-		  baton->callback_required );
-	delete baton;
-	delete req;
-	return;
+    Napi::Env env = info.Env();
+    size_t num_args = info.Length();
+    Napi::Value arg = env.Undefined();
+    Napi::Value callback = env.Undefined();
+
+    if( num_args == 1 && info[0].IsFunction() ) {
+	callback = info[0];
+
+    } else if( num_args == 1 ) {
+	arg = info[0];
+
+    } else if( num_args == 2 && info[1].IsFunction() &&
+	       ( info[0].IsNumber() || info[0].IsString() || info[0].IsObject() ) ) {
+	arg = info[0];
+	callback = info[1];
+
+    } else if( num_args > 1 ) {
+	throwError( env, JS_ERR_INVALID_ARGUMENTS );
     }
-    
-    callBack( NULL, baton->callback, undef, baton->callback_required );
-    
-    delete baton;
-    delete req;
-}
 
-void StmtObject::dropWork( uv_work_t *req ) 
-/******************************************/
-{
-    dropBaton *baton = static_cast<dropBaton*>(req->data);
-    scoped_lock connlock( baton->obj->connection->conn_mutex );
+    std::unique_ptr<ConnectTask> task( new ConnectTask( this ) );
 
-    baton->obj->cleanup();
-    baton->obj->removeConnection();
-}
+    if( arg.IsNumber() ) {
+	// A DBCAPI connection handle from the JavaScript External Environment
+	task->sqlca_connection = true;
+	task->sqlca = (void *)(intptr_t)arg.As<Napi::Number>().Int64Value();
 
-NODE_API_FUNC( StmtObject::drop )
-/*******************************/
-{
-    Isolate *isolate = args.GetIsolate();
-    HandleScope scope( isolate );
-    int num_args = args.Length();
-    bool callback_required = false;
-    int cbfunc_arg = -1;
-    
-    if( num_args == 0 ) {
-	
-    } else if( num_args == 1 && args[0]->IsFunction() ) {
-	callback_required = true;
-	cbfunc_arg = 0;
-	
     } else {
-	throwError( JS_ERR_INVALID_ARGUMENTS );
-	args.GetReturnValue().SetUndefined();
-	return;
+	std::string &conn_string = task->conn_string;
+	conn_string = conn_arg;
+	if( arg.IsString() ) {
+	    conn_string.append( ";" );
+	    conn_string.append( arg.As<Napi::String>().Utf8Value() );
+	} else if( arg.IsObject() ) {
+	    conn_string.append( ";" );
+	    conn_string.append( HashToString( arg.As<Napi::Object>() ) );
+	} else if( !arg.IsUndefined() && !arg.IsNull() ) {
+	    conn_string.append( ";" );
+	    conn_string.append( arg.ToString().Utf8Value() );
+	}
+	conn_string.append( ";CHARSET='UTF-8'" );
     }
-    
-    StmtObject *obj = ObjectWrap::Unwrap<StmtObject>( args.This() );
 
-    dropBaton *baton = new dropBaton();
-    baton->obj = obj;
-    baton->callback_required = callback_required;
-    
-    uv_work_t *req = new uv_work_t();
-    req->data = baton;
-    
-    if( callback_required ) {
-	Local<Function> callback = Local<Function>::Cast(args[cbfunc_arg]);
-	baton->callback.Reset( isolate, callback );
-	
-	int status;
-	status = uv_queue_work( uv_default_loop(), req, dropWork,
-				(uv_after_work_cb)dropAfter );
-	assert(status == 0);
-	
-	args.GetReturnValue().SetUndefined();
-	return;
-    }
-    
-    dropWork( req );
-    dropAfter( req );
-    args.GetReturnValue().SetUndefined();
-    return;
+    return runTask( info, std::move( task ), callback );
 }
 
-void init( Local<Object> exports )
-/********************************/
+// Returns the callback of a method that only takes an optional callback.
+static Napi::Value getOnlyCallback( const Napi::CallbackInfo &info )
+/******************************************************************/
 {
-    uv_mutex_init(&api_mutex);
-#if v012
-    Isolate *isolate = Isolate::GetCurrent();
-#else
-    Isolate *isolate = exports->GetIsolate();
-#endif
-    StmtObject::Init( isolate );
-    Connection::Init( isolate );
-    NODE_SET_METHOD( exports, "createConnection", Connection::NewInstance );
+    if( info.Length() == 0 ) {
+	return info.Env().Undefined();
+    }
+    if( info.Length() == 1 && info[0].IsFunction() ) {
+	return info[0];
+    }
+    throwError( info.Env(), JS_ERR_INVALID_ARGUMENTS );
 }
 
-NODE_MODULE( DRIVER_NAME, init )
+class DisconnectTask : public Task {
+  public:
+    DisconnectTask( Connection *obj ) : obj( obj ) {}
 
-#endif // !v010
+    void execute() override {
+	std::lock_guard<std::mutex> api_lock( api_mutex );
+	std::lock_guard<std::mutex> lock( obj->conn_mutex );
+
+	// Disconnecting when not connected is not an error
+	if( obj->conn == NULL ) {
+	    return;
+	}
+
+	obj->cleanupStmts();
+
+	if( !obj->sqlca_connection ) {
+	    api.sqlany_disconnect( obj->conn );
+	}
+	// Must free the connection object or there will be a memory leak
+	api.sqlany_free_connection( obj->conn );
+	obj->conn = NULL;
+	openConnections--;
+
+	if( openConnections <= 0 ) {
+	    openConnections = 0;
+	    cleanAPI();
+	}
+    }
+
+  private:
+    Connection		*obj;
+};
+
+Napi::Value Connection::disconnect( const Napi::CallbackInfo &info )
+/******************************************************************/
+{
+    Napi::Value callback = getOnlyCallback( info );
+    std::unique_ptr<Task> task( new DisconnectTask( this ) );
+    return runTask( info, std::move( task ), callback );
+}
+
+class EndTransactionTask : public Task {
+  public:
+    EndTransactionTask( Connection *obj, bool commit )
+	: obj( obj ), commit( commit ) {}
+
+    void execute() override {
+	std::lock_guard<std::mutex> lock( obj->conn_mutex );
+	a_sqlany_connection *conn = obj->conn;
+
+	if( conn == NULL ) {
+	    fail( JS_ERR_NOT_CONNECTED );
+	    return;
+	}
+
+	if( !( commit ? api.sqlany_commit( conn ) : api.sqlany_rollback( conn ) ) ) {
+	    fail( conn );
+	}
+    }
+
+  private:
+    Connection		*obj;
+    bool		commit;
+};
+
+Napi::Value Connection::commit( const Napi::CallbackInfo &info )
+/**************************************************************/
+{
+    Napi::Value callback = getOnlyCallback( info );
+    std::unique_ptr<Task> task( new EndTransactionTask( this, true ) );
+    return runTask( info, std::move( task ), callback );
+}
+
+Napi::Value Connection::rollback( const Napi::CallbackInfo &info )
+/****************************************************************/
+{
+    Napi::Value callback = getOnlyCallback( info );
+    std::unique_ptr<Task> task( new EndTransactionTask( this, false ) );
+    return runTask( info, std::move( task ), callback );
+}
+
+Napi::Value Connection::connected( const Napi::CallbackInfo &info )
+/*****************************************************************/
+{
+    return Napi::Boolean::New( info.Env(), conn != NULL );
+}
+
+// Drop
+
+class DropTask : public Task {
+  public:
+    DropTask( Connection *obj, StmtObject *stmt_obj )
+	: obj( obj ), stmt_obj( stmt_obj ) {}
+
+    void execute() override {
+	// obj is NULL if the statement is dropped already
+	if( obj == NULL ) {
+	    return;
+	}
+	std::lock_guard<std::mutex> lock( obj->conn_mutex );
+	stmt_obj->cleanup();
+	obj->removeStmt( stmt_obj );
+    }
+
+    Napi::Value result( Napi::Env env ) override {
+	// The statement is registered with its connection as long as
+	// connection is set
+	if( obj != NULL ) {
+	    stmt_obj->connection = NULL;
+	}
+	return env.Undefined();
+    }
+
+  private:
+    Connection		*obj;
+    StmtObject		*stmt_obj;
+};
+
+Napi::Value StmtObject::drop( const Napi::CallbackInfo &info )
+/************************************************************/
+{
+    Napi::Value callback = getOnlyCallback( info );
+    Connection *obj = connection;
+
+    // Keep the connection object alive until the statement is freed
+    Napi::Object conn_obj;
+    if( obj != NULL ) {
+	conn_obj = obj->Value();
+	if( conn_obj.IsEmpty() ) {
+	    // The connection object is about to free the statement
+	    obj = NULL;
+	}
+    }
+
+    std::unique_ptr<Task> task( new DropTask( obj, this ) );
+    if( obj == NULL ) {
+	return runTask( info, std::move( task ), callback );
+    }
+    return runTask( info, std::move( task ), callback, { conn_obj } );
+}
